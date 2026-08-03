@@ -9,7 +9,7 @@ yoke_ec11/
 ├── CMakeLists.txt              # ESP-IDF 组件声明
 ├── idf_component.yml           # 组件元数据与 IDF 版本约束
 ├── include/yoke_ec11.h         # 公开 API
-├── yoke_ec11.c                 # 驱动实现
+├── src/yoke_ec11.c             # 驱动实现
 ├── docs/
 │   ├── hardware.md              # 接线与模块约定
 │   └── register_map.md          # I2C 寄存器说明

@@ -1,6 +1,0 @@
-version: "0.1.0"
-description: "ESP-IDF driver for the Yoke-EC11-V10 I2C encoder module"
-url: "https://github.com/rootmaker-components/yoke_ec11"
-dependencies:
-  idf:
-    version: ">=5.0"

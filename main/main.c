@@ -1,181 +1,292 @@
-/**
- * Yoke-EC11-V10 两灯颜色调节演示
- *
- * 按键：在 LED1 和 LED2 之间切换当前调节对象。
- * 旋转：调整当前选中 WS2812 的颜色。
- */
+#include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_err.h"
 #include "esp_log.h"
-#include "driver/i2c_master.h"
 
 #include "yoke_ec11.h"
+#include "yoke_rad60.h"
+#include "yoke_rgbw.h"
 
-static const char *TAG = "yoke_demo";
-static i2c_master_bus_handle_t s_i2c_bus;
+const char *TAG = "main";
 
-/* 创建应用持有的 I2C 总线；其他 I2C 外设也应使用 s_i2c_bus。 */
-static esp_err_t init_i2c_bus(void)
+#define RADAR_UART_NUM  UART_NUM_1
+#define RADAR_TX_GPIO   GPIO_NUM_19
+#define RADAR_RX_GPIO   GPIO_NUM_20
+#define RADAR_BAUDRATE  921600U
+
+#define EC11_I2C_PORT   I2C_NUM_0
+#define EC11_SDA_GPIO   GPIO_NUM_13
+#define EC11_SCL_GPIO   GPIO_NUM_14
+
+static bool s_radar_initialized;
+static bool s_ec11_initialized;
+static i2c_master_bus_handle_t s_ec11_i2c_bus;
+static yoke_ec11_t s_ec11;
+
+static void rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t white)
 {
-    const i2c_master_bus_config_t bus_config = {
-        .i2c_port = I2C_NUM_0,
-        .sda_io_num = GPIO_NUM_15,
-        .scl_io_num = GPIO_NUM_16,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    return i2c_new_master_bus(&bus_config, &s_i2c_bus);
-}
-
-/* 将角度限制在 0～359°。 */
-static uint16_t wrap_hue(int hue)
-{
-    hue %= 360;
-    if (hue < 0) hue += 360;
-    return (uint16_t)hue;
-}
-
-/* 将亮度百分比限制在 0～100% 范围。 */
-static uint8_t clamp_brightness_percent(int value)
-{
-    if (value < 0) return 0U;
-    if (value > 100) return 100U;
-    return (uint8_t)value;
-}
-
-/* 根据 0～359° 的色相生成全亮度 RGB 彩虹色。 */
-static yoke_ec11_rgb_t hue_to_rgb(uint16_t hue)
-{
-    uint8_t sector = (uint8_t)(hue / 60U);
-    uint8_t level = (uint8_t)(((hue % 60U) * 255U) / 60U);
-
-    switch (sector) {
-    case 0:  return (yoke_ec11_rgb_t){.red = 255U, .green = level, .blue = 0U};
-    case 1:  return (yoke_ec11_rgb_t){.red = (uint8_t)(255U - level), .green = 255U, .blue = 0U};
-    case 2:  return (yoke_ec11_rgb_t){.red = 0U, .green = 255U, .blue = level};
-    case 3:  return (yoke_ec11_rgb_t){.red = 0U, .green = (uint8_t)(255U - level), .blue = 255U};
-    case 4:  return (yoke_ec11_rgb_t){.red = level, .green = 0U, .blue = 255U};
-    default: return (yoke_ec11_rgb_t){.red = 255U, .green = 0U, .blue = (uint8_t)(255U - level)};
+    esp_err_t ret = yoke_rgbw_set_all(red, green, blue, white);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "RGBW 设置失败: %s", esp_err_to_name(ret));
     }
 }
 
-/* 将 RGB 颜色换算为 0～359° 色相，仅供颜色旋转时临时使用。 */
-static uint16_t rgb_to_hue(yoke_ec11_rgb_t color)
+static void rgbw_print_help(void)
 {
-    uint8_t max = color.red;
-    uint8_t min = color.red;
-    if (color.green > max) max = color.green;
-    if (color.blue > max) max = color.blue;
-    if (color.green < min) min = color.green;
-    if (color.blue < min) min = color.blue;
+    ESP_LOGI(TAG, "RGBW: r=red, g=green, b=blue, w=white, o=off");
+    ESP_LOGI(TAG, "RAD60: i=init, d=read, e=enable, x=disable, u=deinit, h=help");
+    ESP_LOGI(TAG, "EC11: I=init, K=key, C=count, D=diff, R/G/B/W=color, O=off, U=deinit");
+}
 
-    int delta = (int)max - min;
-    if (delta == 0) return 0U;
+static bool ec11_is_ready(void)
+{
+    if (!s_ec11_initialized) {
+        ESP_LOGW(TAG, "EC11 is not initialized; input I first");
+        return false;
+    }
+    return true;
+}
 
-    int hue;
-    if (max == color.red) {
-        hue = 60 * ((int)color.green - color.blue) / delta;
-    } else if (max == color.green) {
-        hue = 120 + 60 * ((int)color.blue - color.red) / delta;
+static void ec11_init(void)
+{
+    if (s_ec11_initialized) {
+        ESP_LOGW(TAG, "EC11 is already initialized");
+        return;
+    }
+
+    if (s_ec11_i2c_bus == NULL) {
+        const i2c_master_bus_config_t bus_config = {
+            .i2c_port = EC11_I2C_PORT,
+            .sda_io_num = EC11_SDA_GPIO,
+            .scl_io_num = EC11_SCL_GPIO,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .flags.enable_internal_pullup = true,
+        };
+        esp_err_t ret = i2c_new_master_bus(&bus_config, &s_ec11_i2c_bus);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "EC11 I2C bus init failed: %s", esp_err_to_name(ret));
+            return;
+        }
+    }
+
+    yoke_ec11_config_t config = yoke_ec11_default_config();
+    config.verify_device_id = true;
+    esp_err_t ret = yoke_ec11_init(&s_ec11, s_ec11_i2c_bus, &config);
+    if (ret == ESP_OK) {
+        s_ec11_initialized = true;
+        ESP_LOGI(TAG, "EC11 initialized: I2C%d SDA=%d SCL=%d", EC11_I2C_PORT,
+                 EC11_SDA_GPIO, EC11_SCL_GPIO);
     } else {
-        hue = 240 + 60 * ((int)color.red - color.green) / delta;
+        ESP_LOGE(TAG, "EC11 init failed: %s", esp_err_to_name(ret));
     }
-    return wrap_hue(hue);
 }
 
-/* 将 RGB 颜色沿彩虹色环旋转指定的编码器增量。 */
-static yoke_ec11_rgb_t rotate_color(yoke_ec11_rgb_t color, int16_t diff)
+static void ec11_read_key(void)
 {
-    uint16_t hue = rgb_to_hue(color);
-    hue = wrap_hue((int)hue + diff * 5);
-    return hue_to_rgb(hue);
+    if (!ec11_is_ready()) return;
+
+    yoke_ec11_key_t key;
+    esp_err_t ret = yoke_ec11_read_key(&s_ec11, &key);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "EC11 key: pressed=%d press_count=%u", key.pressed, key.press_count);
+    } else {
+        ESP_LOGE(TAG, "EC11 key read failed: %s", esp_err_to_name(ret));
+    }
 }
 
-/* 按共享亮度百分比缩放颜色，亮度范围为 0～100%。 */
-static yoke_ec11_rgb_t scale_color(yoke_ec11_rgb_t color, uint8_t brightness_percent)
+static void ec11_read_encoder(bool read_diff)
 {
-    color.red = (uint8_t)(((uint16_t)color.red * brightness_percent) / 100U);
-    color.green = (uint8_t)(((uint16_t)color.green * brightness_percent) / 100U);
-    color.blue = (uint8_t)(((uint16_t)color.blue * brightness_percent) / 100U);
-    return color;
+    if (!ec11_is_ready()) return;
+
+    int16_t value;
+    esp_err_t ret = read_diff ? yoke_ec11_read_encoder_diff(&s_ec11, &value)
+                              : yoke_ec11_read_encoder_count(&s_ec11, &value);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "EC11 %s=%d", read_diff ? "diff" : "count", value);
+    } else {
+        ESP_LOGE(TAG, "EC11 %s read failed: %s", read_diff ? "diff" : "count",
+                 esp_err_to_name(ret));
+    }
 }
 
-/* 用各自的 RGB 颜色和共同亮度百分比更新两颗 WS2812。 */
-static esp_err_t update_leds(const yoke_ec11_t *yoke, const yoke_ec11_rgb_t colors[2],
-                             uint8_t brightness_percent)
+static void ec11_set_color(uint8_t red, uint8_t green, uint8_t blue)
 {
-    yoke_ec11_rgb_t led1 = scale_color(colors[0], brightness_percent);
-    yoke_ec11_rgb_t led2 = scale_color(colors[1], brightness_percent);
-    return yoke_ec11_set_ws2812_all(yoke, led1, led2);
+    if (!ec11_is_ready()) return;
+
+    const yoke_ec11_rgb_t color = {.red = red, .green = green, .blue = blue};
+    esp_err_t ret = yoke_ec11_set_ws2812_all(&s_ec11, color, color);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "EC11 LED set failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void ec11_deinit(void)
+{
+    if (!ec11_is_ready()) return;
+
+    esp_err_t ret = yoke_ec11_deinit(&s_ec11);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "EC11 deinit failed: %s", esp_err_to_name(ret));
+        return;
+    }
+    s_ec11_initialized = false;
+
+    ret = i2c_del_master_bus(s_ec11_i2c_bus);
+    if (ret == ESP_OK) {
+        s_ec11_i2c_bus = NULL;
+        ESP_LOGI(TAG, "EC11 deinitialized");
+    } else {
+        ESP_LOGE(TAG, "EC11 I2C bus deinit failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void radar_init(void)
+{
+    if (s_radar_initialized) {
+        ESP_LOGW(TAG, "RAD60 is already initialized");
+        return;
+    }
+
+    esp_err_t ret = yoke_rad60_init(RADAR_UART_NUM, RADAR_TX_GPIO, RADAR_RX_GPIO,
+                                    RADAR_BAUDRATE);
+    if (ret == ESP_OK) {
+        s_radar_initialized = true;
+        ESP_LOGI(TAG, "RAD60 initialized: UART%d TX=%d RX=%d baud=%lu", RADAR_UART_NUM,
+                 RADAR_TX_GPIO, RADAR_RX_GPIO, (unsigned long)RADAR_BAUDRATE);
+    } else {
+        ESP_LOGE(TAG, "RAD60 init failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void radar_read(void)
+{
+    if (!s_radar_initialized) {
+        ESP_LOGW(TAG, "RAD60 is not initialized; input i first");
+        return;
+    }
+
+    yoke_rad60_radar_data_t data;
+    esp_err_t ret = yoke_rad60_get_radar_data(&data);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "RAD60 read failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "RAD60: comm=%d detected=%d objects=%u", data.is_comm_ok,
+             data.is_detected, data.radar_info.obj_num);
+    uint8_t object_count = data.radar_info.obj_num > 2U ? 2U : data.radar_info.obj_num;
+    for (uint8_t index = 0; index < object_count; ++index) {
+        const multitarget_obj_info_t *object = &data.radar_info.obj[index];
+        ESP_LOGI(TAG, "  object[%u]: distance=%u cm angle=%d deg velocity=%d cm/s id=%u",
+                 index, object->range_val, object->angle_val, object->velo_val, object->objid);
+    }
+}
+
+static void radar_set_enabled(bool enabled)
+{
+    if (!s_radar_initialized) {
+        ESP_LOGW(TAG, "RAD60 is not initialized; input i first");
+        return;
+    }
+
+    esp_err_t ret = yoke_rad60_set_radar_enable(enabled ? 1U : 0U);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "RAD60 detection %s", enabled ? "enabled" : "disabled");
+    } else {
+        ESP_LOGE(TAG, "RAD60 enable command failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void radar_deinit(void)
+{
+    if (!s_radar_initialized) {
+        ESP_LOGW(TAG, "RAD60 is not initialized");
+        return;
+    }
+
+    esp_err_t ret = yoke_rad60_deinit();
+    if (ret == ESP_OK) {
+        s_radar_initialized = false;
+        ESP_LOGI(TAG, "RAD60 deinitialized");
+    } else {
+        ESP_LOGE(TAG, "RAD60 deinit failed: %s", esp_err_to_name(ret));
+    }
 }
 
 void app_main(void)
 {
-    /* 第一步：应用创建 I2C 总线。 */
-    esp_err_t ret = init_i2c_bus();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C 总线创建失败：%s", esp_err_to_name(ret));
-        return;
-    }
+    yoke_rgbw_config_t rgbw_config = yoke_rgbw_default_config();
+    rgbw_config.gpio_num = 15;
+    rgbw_config.led_num = 3;
+    ESP_ERROR_CHECK(yoke_rgbw_init(&rgbw_config));
+    rgbw_set_all(0, 0, 0, 0);
+    rgbw_print_help();
 
-    /* 第二步：将 Yoke 外设挂载到共享 I2C 总线。 */
-    yoke_ec11_t yoke;
-    yoke_ec11_config_t config = yoke_ec11_default_config();
-    config.scl_speed_hz = 100000U;
-    config.timeout_ms = 1000U;
-    config.verify_device_id = true;
-    ret = yoke_ec11_init(&yoke, s_i2c_bus, &config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Yoke 初始化失败：%s", esp_err_to_name(ret));
-        return;
-    }
-
-    uint8_t selected_led = 0U;        /* 0 对应 LED1，1 对应 LED2。 */
-    yoke_ec11_rgb_t colors[2] = {     /* 两颗灯各自保存当前 RGB 颜色。 */
-        {.red = 255U, .green = 0U, .blue = 0U},
-        {.red = 0U, .green = 0U, .blue = 255U},
-    };
-    uint8_t brightness_percent = 10U; /* 两颗灯共用 10% 初始亮度。 */
-    bool adjusted_brightness = false; /* 用于区分短按与按住旋转。 */
-    ESP_ERROR_CHECK(update_leds(&yoke, colors, brightness_percent));
-    ESP_LOGI(TAG, "当前调节对象：LED1。旋转调颜色；按住再旋转调灯光亮度；短按切换灯对象。");
-
-    while (true) {
-        yoke_ec11_key_t key;
-        ret = yoke_ec11_read_key(&yoke, &key);
-        bool key_pressed = ret == ESP_OK && key.pressed;
-
-        int16_t diff;
-        esp_err_t diff_ret = yoke_ec11_read_encoder_diff(&yoke, &diff);
-        if (diff_ret == ESP_OK && diff != 0) {
-            if (key_pressed) {
-                brightness_percent = clamp_brightness_percent(
-                    (int)brightness_percent + diff * 5);
-                adjusted_brightness = true;
-                if (update_leds(&yoke, colors, brightness_percent) == ESP_OK) {
-                    ESP_LOGI(TAG, "灯光亮度：%u%%", brightness_percent);
-                }
+    char input;
+    while(1){
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (scanf("%c", &input) == 1){
+            if (input == '\r' || input == '\n') {
+                continue;
+            }
+            ESP_LOGI(TAG, "input: %c", input);
+            if(input == 'r'){
+                ESP_LOGI(TAG, "set all to red");
+                rgbw_set_all(25, 0, 0, 0);
+            } else if(input == 'g'){
+                ESP_LOGI(TAG, "set all to green");
+                rgbw_set_all(0, 25, 0, 0);
+            } else if(input == 'b'){
+                ESP_LOGI(TAG, "set all to blue");
+                rgbw_set_all(0, 0, 25, 0);
+            } else if(input == 'w'){
+                ESP_LOGI(TAG, "set all to white");
+                rgbw_set_all(0, 0, 0, 25);
+            } else if(input == 'o'){
+                ESP_LOGI(TAG, "turn off all");
+                rgbw_set_all(0, 0, 0, 0);
+            } else if(input == 'h'){
+                rgbw_print_help();
+            } else if(input == 'i'){
+                radar_init();
+            } else if(input == 'd'){
+                radar_read();
+            } else if(input == 'e'){
+                radar_set_enabled(true);
+            } else if(input == 'x'){
+                radar_set_enabled(false);
+            } else if(input == 'u'){
+                radar_deinit();
+            } else if(input == 'I'){
+                ec11_init();
+            } else if(input == 'K'){
+                ec11_read_key();
+            } else if(input == 'C'){
+                ec11_read_encoder(false);
+            } else if(input == 'D'){
+                ec11_read_encoder(true);
+            } else if(input == 'R'){
+                ec11_set_color(25, 0, 0);
+            } else if(input == 'G'){
+                ec11_set_color(0, 25, 0);
+            } else if(input == 'B'){
+                ec11_set_color(0, 0, 25);
+            } else if(input == 'W'){
+                ec11_set_color(25, 25, 25);
+            } else if(input == 'O'){
+                ec11_set_color(0, 0, 0);
+            } else if(input == 'U'){
+                ec11_deinit();
             } else {
-                colors[selected_led] = rotate_color(colors[selected_led], diff);
-                yoke_ec11_rgb_t color = scale_color(colors[selected_led], brightness_percent);
-                if (update_leds(&yoke, colors, brightness_percent) == ESP_OK) {
-                    ESP_LOGI(TAG, "LED%u：RGB=(%u, %u, %u)", selected_led + 1U,
-                             color.red, color.green, color.blue);
-                }
+                ESP_LOGW(TAG, "unknown command: %c", input);
             }
         }
-
-        if (ret == ESP_OK && key.press_count != 0U) {
-            if (!adjusted_brightness) {
-                selected_led = selected_led == 0U ? 1U : 0U;
-                ESP_LOGI(TAG, "当前调节对象：LED%u", selected_led + 1U);
-            }
-            adjusted_brightness = false;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }

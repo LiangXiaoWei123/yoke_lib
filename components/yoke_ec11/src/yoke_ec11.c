@@ -1,3 +1,4 @@
+/** @file yoke_ec11.c */
 #include "yoke_ec11.h"
 
 #include <string.h>
