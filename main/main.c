@@ -10,6 +10,7 @@
 #include "esp_log.h"
 
 #include "yoke_ec11.h"
+#include "yoke_moto.h"
 #include "yoke_rad60.h"
 #include "yoke_rgbw.h"
 
@@ -24,10 +25,14 @@ const char *TAG = "main";
 #define EC11_SDA_GPIO   GPIO_NUM_13
 #define EC11_SCL_GPIO   GPIO_NUM_14
 
+#define MOTOR_PWMA_GPIO          GPIO_NUM_17
+#define MOTOR_PWMB_GPIO          GPIO_NUM_18
+
 static bool s_radar_initialized;
 static bool s_ec11_initialized;
 static i2c_master_bus_handle_t s_ec11_i2c_bus;
 static yoke_ec11_t s_ec11;
+static yoke_moto_t s_motor;
 
 static void rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t white)
 {
@@ -37,11 +42,90 @@ static void rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t white
     }
 }
 
-static void rgbw_print_help(void)
+static void print_help(void)
 {
     ESP_LOGI(TAG, "RGBW: r=red, g=green, b=blue, w=white, o=off");
     ESP_LOGI(TAG, "RAD60: i=init, d=read, e=enable, x=disable, u=deinit, h=help");
     ESP_LOGI(TAG, "EC11: I=init, K=key, C=count, D=diff, R/G/B/W=color, O=off, U=deinit");
+    ESP_LOGI(TAG, "MOTOR: m=init, f=forward, v=reverse, s=coast, q=brake, 1/2/3/4=speed, z=deinit");
+}
+
+static bool motor_is_ready(void)
+{
+    if (!s_motor.initialized) {
+        ESP_LOGW(TAG, "Motor is not initialized; input m first");
+        return false;
+    }
+    return true;
+}
+
+static void motor_set_speed(uint8_t percent)
+{
+    if (!motor_is_ready()) return;
+
+    esp_err_t ret = yoke_moto_set_speed_percent(&s_motor, percent);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Motor speed=%u%%", percent);
+    } else {
+        ESP_LOGE(TAG, "Motor speed set failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void motor_init(void)
+{
+    if (s_motor.initialized) {
+        ESP_LOGW(TAG, "Motor is already initialized");
+        return;
+    }
+
+    yoke_moto_config_t config = yoke_moto_default_config();
+    config.pwma_gpio_num = MOTOR_PWMA_GPIO;
+    config.pwmb_gpio_num = MOTOR_PWMB_GPIO;
+    esp_err_t ret = yoke_moto_init(&s_motor, &config);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Motor initialized: PWMA=%d PWMB=%d, speed=50%%, coast", MOTOR_PWMA_GPIO,
+                 MOTOR_PWMB_GPIO);
+        return;
+    }
+
+    ESP_LOGE(TAG, "Motor init failed: %s", esp_err_to_name(ret));
+    (void)yoke_moto_deinit(&s_motor);
+}
+
+static void motor_drive(bool forward)
+{
+    if (!motor_is_ready()) return;
+
+    esp_err_t ret = forward ? yoke_moto_forward(&s_motor) : yoke_moto_reverse(&s_motor);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Motor %s", forward ? "forward" : "reverse");
+    } else {
+        ESP_LOGE(TAG, "Motor direction set failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void motor_stop(bool brake)
+{
+    if (!motor_is_ready()) return;
+
+    esp_err_t ret = brake ? yoke_moto_brake(&s_motor) : yoke_moto_coast(&s_motor);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Motor %s", brake ? "brake" : "coast");
+    } else {
+        ESP_LOGE(TAG, "Motor stop failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void motor_deinit(void)
+{
+    if (!motor_is_ready()) return;
+
+    esp_err_t ret = yoke_moto_deinit(&s_motor);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Motor deinitialized");
+    } else {
+        ESP_LOGE(TAG, "Motor deinit failed: %s", esp_err_to_name(ret));
+    }
 }
 
 static bool ec11_is_ready(void)
@@ -227,7 +311,7 @@ void app_main(void)
     rgbw_config.led_num = 3;
     ESP_ERROR_CHECK(yoke_rgbw_init(&rgbw_config));
     rgbw_set_all(0, 0, 0, 0);
-    rgbw_print_help();
+    print_help();
 
     char input;
     while(1){
@@ -253,7 +337,7 @@ void app_main(void)
                 ESP_LOGI(TAG, "turn off all");
                 rgbw_set_all(0, 0, 0, 0);
             } else if(input == 'h'){
-                rgbw_print_help();
+                print_help();
             } else if(input == 'i'){
                 radar_init();
             } else if(input == 'd'){
@@ -284,6 +368,26 @@ void app_main(void)
                 ec11_set_color(0, 0, 0);
             } else if(input == 'U'){
                 ec11_deinit();
+            } else if(input == 'm'){
+                motor_init();
+            } else if(input == 'f'){
+                motor_drive(true);
+            } else if(input == 'v'){
+                motor_drive(false);
+            } else if(input == 's'){
+                motor_stop(false);
+            } else if(input == 'q'){
+                motor_stop(true);
+            } else if(input == '1'){
+                motor_set_speed(25);
+            } else if(input == '2'){
+                motor_set_speed(50);
+            } else if(input == '3'){
+                motor_set_speed(75);
+            } else if(input == '4'){
+                motor_set_speed(100);
+            } else if(input == 'z'){
+                motor_deinit();
             } else {
                 ESP_LOGW(TAG, "unknown command: %c", input);
             }
