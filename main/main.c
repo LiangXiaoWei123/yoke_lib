@@ -10,6 +10,7 @@
 #include "esp_log.h"
 
 #include "yoke_ec11.h"
+#include "yoke_keyw.h"
 #include "yoke_moto.h"
 #include "yoke_rad60.h"
 #include "yoke_rgbw.h"
@@ -28,11 +29,15 @@ const char *TAG = "main";
 #define MOTOR_PWMA_GPIO          GPIO_NUM_17
 #define MOTOR_PWMB_GPIO          GPIO_NUM_18
 
+// GPIO17 and GPIO18 are assigned to Yoke-KEYW. Do not initialize the motor
+// while this temporary pin assignment is in use.
+
 static bool s_radar_initialized;
 static bool s_ec11_initialized;
 static i2c_master_bus_handle_t s_ec11_i2c_bus;
 static yoke_ec11_t s_ec11;
 static yoke_moto_t s_motor;
+static yoke_keyw_t s_keyw;
 
 static void rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t white)
 {
@@ -48,6 +53,13 @@ static void print_help(void)
     ESP_LOGI(TAG, "RAD60: i=init, d=read, e=enable, x=disable, u=deinit, h=help");
     ESP_LOGI(TAG, "EC11: I=init, K=key, C=count, D=diff, R/G/B/W=color, O=off, U=deinit");
     ESP_LOGI(TAG, "MOTOR: m=init, f=forward, v=reverse, s=coast, q=brake, 1/2/3/4=speed, z=deinit");
+    ESP_LOGI(TAG, "Yoke-KEYW: GPIO17 button, GPIO18 PWM LED");
+}
+
+static void keyw_event_callback(yoke_keyw_event_t event, void *user_data)
+{
+    (void)user_data;
+    ESP_LOGI(TAG, "Yoke-KEYW event: %s", yoke_keyw_event_to_string(event));
 }
 
 static bool motor_is_ready(void)
@@ -311,6 +323,9 @@ void app_main(void)
     rgbw_config.led_num = 3;
     ESP_ERROR_CHECK(yoke_rgbw_init(&rgbw_config));
     rgbw_set_all(0, 0, 0, 0);
+    yoke_keyw_config_t keyw_config = yoke_keyw_default_config();
+    keyw_config.event_cb = keyw_event_callback;
+    ESP_ERROR_CHECK(yoke_keyw_init(&s_keyw, &keyw_config));
     print_help();
 
     char input;
