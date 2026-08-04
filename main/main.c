@@ -8,12 +8,10 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
+#include "lvgl.h"
 
-#include "yoke_ec11.h"
-#include "yoke_keyw.h"
-#include "yoke_moto.h"
-#include "yoke_rad60.h"
-#include "yoke_rgbw.h"
+#include "yoke.h"
 
 const char *TAG = "main";
 
@@ -60,6 +58,57 @@ static void keyw_event_callback(yoke_keyw_event_t event, void *user_data)
 {
     (void)user_data;
     ESP_LOGI(TAG, "Yoke-KEYW event: %s", yoke_keyw_event_to_string(event));
+}
+
+static void touch_slider_event(lv_event_t *event)
+{
+    lv_obj_t *slider = lv_event_get_target(event);
+    lv_obj_t *value_label = lv_event_get_user_data(event);
+    lv_indev_t *indev = lv_indev_get_act();
+    lv_point_t point = {0};
+    if (indev != NULL) lv_indev_get_point(indev, &point);
+    lv_label_set_text_fmt(value_label, "Touch: x=%d  y=%d\nSlider: %d%%", (int)point.x, (int)point.y,
+                          (int)lv_slider_get_value(slider));
+}
+
+static void screen_create_demo(void)
+{
+    if (!lvgl_port_lock(0)) return;
+
+    lv_obj_t *screen = lv_screen_active();
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x101827), 0);
+
+    lv_obj_t *title = lv_label_create(screen);
+    lv_label_set_text(title, "Yoke RootMaker");
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 26);
+
+    lv_obj_t *status = lv_label_create(screen);
+    lv_label_set_text(status, "Drag the slider to test touch");
+    lv_obj_set_style_text_color(status, lv_color_hex(0x64D8FF), 0);
+    lv_obj_align(status, LV_ALIGN_CENTER, 0, -35);
+
+    lv_obj_t *slider = lv_slider_create(screen);
+    lv_obj_set_width(slider, 180);
+    lv_slider_set_range(slider, 0, 100);
+    lv_slider_set_value(slider, 50, LV_ANIM_OFF);
+    lv_obj_align(slider, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0x34465E), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0x37B8F0), LV_PART_INDICATOR);
+
+    lv_obj_t *touch_value = lv_label_create(screen);
+    lv_label_set_text(touch_value, "Touch: x=-  y=-\nSlider: 50%");
+    lv_obj_set_style_text_color(touch_value, lv_color_white(), 0);
+    lv_obj_align(touch_value, LV_ALIGN_CENTER, 0, 38);
+    lv_obj_add_event_cb(slider, touch_slider_event, LV_EVENT_VALUE_CHANGED, touch_value);
+    lv_obj_add_event_cb(slider, touch_slider_event, LV_EVENT_PRESSING, touch_value);
+
+    lv_obj_t *hint = lv_label_create(screen);
+    lv_label_set_text(hint, "Value must change while dragging");
+    lv_obj_set_style_text_color(hint, lv_color_hex(0xAAB7C4), 0);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -28);
+    lvgl_port_unlock();
 }
 
 static bool motor_is_ready(void)
@@ -326,6 +375,11 @@ void app_main(void)
     yoke_keyw_config_t keyw_config = yoke_keyw_default_config();
     keyw_config.event_cb = keyw_event_callback;
     ESP_ERROR_CHECK(yoke_keyw_init(&s_keyw, &keyw_config));
+    if (screen_with_lvgl_init() != NULL) {
+        screen_create_demo();
+    } else {
+        ESP_LOGE(TAG, "Screen initialization failed; continuing without UI");
+    }
     print_help();
 
     char input;

@@ -1,7 +1,0 @@
-cmake_minimum_required(VERSION 3.16)
-
-# 本示例直接引用相邻的 yoke_ec11 组件，无需安装到 IDF 组件仓库。
-set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../..")
-
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(yoke_ec11_basic_example)

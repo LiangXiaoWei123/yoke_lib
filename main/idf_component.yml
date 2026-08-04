@@ -15,3 +15,5 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/button: ^4.2.0
+  lvgl/lvgl: ^9.4.0
+  espressif/esp_lvgl_port: ^2.7.0
