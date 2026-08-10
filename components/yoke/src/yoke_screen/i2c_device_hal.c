@@ -1,5 +1,6 @@
 #include <inttypes.h>
 
+#include "esp_err.h"
 #include "i2c_device_hal.h"
 #include "i2c_device.h"
 #include "driver/i2c_types.h"
@@ -18,16 +19,19 @@ int i2c_dev_init(int i2c_num, i2c_port_obj_t* port_obj) {
 
     i2c_master_bus_handle_t bus_handle = NULL;
     if (g_bus_handle[i2c_num] == NULL) {
-        i2c_master_bus_config_t i2c_bus_config = {
-            .clk_source = I2C_CLK_SRC_DEFAULT,
-            .i2c_port = i2c_num,
-            .scl_io_num = port_obj->scl,
-            .sda_io_num = port_obj->sda,
-            .glitch_ignore_cnt = 7,
-            .flags.enable_internal_pullup = true,
-        };
-
-        if (i2c_new_master_bus(&i2c_bus_config, &bus_handle) != ESP_OK) {
+        esp_err_t ret = i2c_master_get_bus_handle(i2c_num, &bus_handle);
+        if (ret == ESP_ERR_INVALID_STATE) {
+            i2c_master_bus_config_t i2c_bus_config = {
+                .clk_source = I2C_CLK_SRC_DEFAULT,
+                .i2c_port = i2c_num,
+                .scl_io_num = port_obj->scl,
+                .sda_io_num = port_obj->sda,
+                .glitch_ignore_cnt = 7,
+                .flags.enable_internal_pullup = true,
+            };
+            ret = i2c_new_master_bus(&i2c_bus_config, &bus_handle);
+        }
+        if (ret != ESP_OK) {
             return I2C_PORT_NO_INIT;
         }
         g_bus_handle[i2c_num] = bus_handle;
@@ -112,4 +116,3 @@ int i2c_dev_read_bytes(int i2c_port, uint8_t device_addr, uint32_t reg_addr, uin
 i2c_master_bus_handle_t i2c_dev_get_bus_handle(int i2c_num) {
     return g_bus_handle[i2c_num];
 }
-

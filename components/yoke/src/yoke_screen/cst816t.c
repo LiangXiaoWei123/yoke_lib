@@ -17,6 +17,15 @@ static qmsd_err_t cst816t_init(const touch_panel_config_t *config) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     cst816t_device = i2c_malloc_device(config->i2c_num, config->sda_pin, config->scl_pin, config->i2c_freq, 0x15);
+    if (cst816t_device == NULL) {
+        return QMSD_ERR_FAIL;
+    }
+
+    /* Create the I2C bus now rather than waiting for the first touch event. */
+    if (i2c_apply_bus(cst816t_device) != I2C_OK) {
+        return QMSD_ERR_FAIL;
+    }
+    i2c_free_bus(cst816t_device);
     return QMSD_ERR_OK;
 }
 
@@ -42,5 +51,4 @@ touch_panel_driver_t touch_cst816t_driver = {
     .deinit = cst816t_deinit,
     .read_point_data = cst816t_read_point_data,
 };
-
 

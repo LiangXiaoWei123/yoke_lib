@@ -35,7 +35,6 @@ static void touch_read_task(void *arg) {
     uint32_t touch_last_time = 0;
     touch_panel_points_t point;
     memset(&point, 0, sizeof(touch_panel_points_t));
-    g_touch_panel->init(g_panel_config);
     for (;;) {
         if (skip_intr == 0) {
             xTaskNotifyWait(0x00, 0x00, NULL, pdMS_TO_TICKS(1000));
@@ -110,6 +109,17 @@ qmsd_err_t touch_init(touch_panel_driver_t* touch_panel, touch_panel_config_t* p
         };
         gpio_config(&io_conf);
     }
+
+    /*
+     * Initialize the controller and its I2C bus synchronously.  Other board
+     * devices can then safely obtain the bus handle immediately after screen
+     * initialization, before this optional background reader is scheduled.
+     */
+    if (g_touch_panel->init(g_panel_config) != QMSD_ERR_OK) {
+        ESP_LOGE(TAG, "Touch controller initialization failed");
+        return QMSD_ERR_FAIL;
+    }
+
     if (panel_config->task_en) {
         TaskHandle_t task_handle;
         qmsd_thread_create(touch_read_task, "touch", panel_config->task_stack_size, (void *)(panel_config->intr_pin < 0), panel_config->task_priority, &task_handle, 0, 1);
@@ -122,8 +132,6 @@ qmsd_err_t touch_init(touch_panel_driver_t* touch_panel, touch_panel_config_t* p
             gpio_set_intr_type(panel_config->intr_pin, GPIO_INTR_NEGEDGE);
             gpio_isr_handler_add(panel_config->intr_pin, touch_isr_handler, task_handle);
         }
-    } else {
-        g_touch_panel->init(g_panel_config);
     }
     return QMSD_ERR_OK;
 }
@@ -153,4 +161,3 @@ uint32_t touch_get_last_press_ticks() {
 void touch_deinit() {
 
 }
-
