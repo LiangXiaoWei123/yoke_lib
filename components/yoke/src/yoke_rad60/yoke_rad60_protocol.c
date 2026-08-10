@@ -75,11 +75,7 @@ void yoke_rad60_protocol_deinit(void) {
     if (uart_send_task_handle != NULL) {
         ESP_LOGI(TAG, "Deleting UART send task (stack=2KB)...");
 
-        #if (configSUPPORT_STATIC_ALLOCATION == 1 && CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY == 1)
-        vTaskDeleteWithCaps(uart_send_task_handle);
-        #else
         vTaskDelete(uart_send_task_handle);
-        #endif
         uart_send_task_handle = NULL;
         has_tasks = true;
         ESP_LOGI(TAG, "UART send task deleted");
@@ -89,11 +85,7 @@ void yoke_rad60_protocol_deinit(void) {
     if (uart_frame_task_handle != NULL) {
         ESP_LOGI(TAG, "Deleting UART frame task (stack=3KB)...");
 
-        #if (configSUPPORT_STATIC_ALLOCATION == 1 && CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY == 1)
-        vTaskDeleteWithCaps(uart_frame_task_handle);
-        #else
         vTaskDelete(uart_frame_task_handle);
-        #endif
         uart_frame_task_handle = NULL;
         has_tasks = true;
         ESP_LOGI(TAG, "UART frame task deleted");
@@ -651,4 +643,3 @@ static void uart_frame_task(void* arg) {
     }
     vTaskDelete(NULL);
 }
-
