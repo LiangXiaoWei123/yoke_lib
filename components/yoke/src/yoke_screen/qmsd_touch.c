@@ -12,6 +12,12 @@
 
 #define TAG "TOUCH"
 
+#if CONFIG_YOKE_BSP_SCREEN_TOUCH_TASK_STACK_IN_PSRAM
+#define YOKE_SCREEN_TOUCH_TASK_STACK_IN_EXTERNAL_MEMORY 1
+#else
+#define YOKE_SCREEN_TOUCH_TASK_STACK_IN_EXTERNAL_MEMORY 0
+#endif
+
 typedef struct _touch_info_t {
     atomic_short x;
     atomic_short y;
@@ -122,7 +128,7 @@ qmsd_err_t touch_init(touch_panel_driver_t* touch_panel, touch_panel_config_t* p
 
     if (panel_config->task_en) {
         TaskHandle_t task_handle;
-        qmsd_thread_create(touch_read_task, "touch", panel_config->task_stack_size, (void *)(panel_config->intr_pin < 0), panel_config->task_priority, &task_handle, 0, 1);
+        qmsd_thread_create(touch_read_task, "touch", panel_config->task_stack_size, (void *)(panel_config->intr_pin < 0), panel_config->task_priority, &task_handle, 0, YOKE_SCREEN_TOUCH_TASK_STACK_IN_EXTERNAL_MEMORY);
         if (panel_config->intr_pin > -1) {
             esp_err_t ret = gpio_install_isr_service(0);
             if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {

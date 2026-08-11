@@ -9,5 +9,5 @@ idf_component_register(
          "src/yoke_screen/i2c_device_hal.c" "src/yoke_screen/qmsd_utils.c"
     INCLUDE_DIRS "src" "src/yoke_ec11" "src/yoke_keyw" "src/yoke_moto" "src/yoke_rgbw" "src/yoke_rad60" "src/yoke_screen"
     PRIV_INCLUDE_DIRS "${IDF_PATH}/components/esp_driver_i2c"
-    REQUIRES espressif__button espressif__bdc_motor esp_driver_i2c esp_driver_ledc esp_driver_rmt esp_driver_spi esp_driver_uart esp_lcd esp_lvgl_port lvgl__lvgl freertos driver
+    REQUIRES espressif__button espressif__bdc_motor esp_driver_i2c esp_driver_rmt esp_driver_spi esp_driver_uart esp_lcd esp_lvgl_port lvgl__lvgl freertos driver
 )

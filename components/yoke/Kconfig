@@ -1,0 +1,46 @@
+menu "yoke_bsp"
+
+menu "Screen"
+
+config YOKE_BSP_SCREEN_LVGL_DRAW_BUFFER_IN_PSRAM
+    bool "Allocate LVGL draw buffers in PSRAM"
+    default y
+    depends on SPIRAM && SOC_PSRAM_DMA_CAPABLE
+    help
+        Store the large LVGL draw buffers in PSRAM. The ST7789 SPI path uses
+        DMA, so this option is available only on targets whose PSRAM is DMA
+        capable. Disable it to allocate the buffers in internal SRAM instead.
+
+config YOKE_BSP_SCREEN_LVGL_TASK_STACK_IN_PSRAM
+    bool "Allocate LVGL task stack in PSRAM"
+    default n
+    depends on SPIRAM && FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    help
+        Store the LVGL task stack in PSRAM to preserve internal SRAM. Keep
+        this disabled when the task may execute code that requires an
+        internal-memory stack while cache is disabled.
+
+config YOKE_BSP_SCREEN_TOUCH_TASK_STACK_IN_PSRAM
+    bool "Allocate touch task stack in PSRAM"
+    default n
+    depends on SPIRAM && FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    help
+        Store the CST816T touch polling task stack in PSRAM. This only affects
+        the task stack; small I2C and driver control objects remain in SRAM.
+
+endmenu
+
+menu "RAD60 radar"
+
+config YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM
+    bool "Allocate RAD60 task stacks in PSRAM"
+    default n
+    depends on SPIRAM && FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    help
+        Store the RAD60 processing task and its UART receive/send task stacks
+        in PSRAM. This saves internal SRAM, but the tasks must not run code
+        that requires an internal-memory stack while cache is disabled.
+
+endmenu
+
+endmenu

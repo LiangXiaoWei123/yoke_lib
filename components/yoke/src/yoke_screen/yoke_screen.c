@@ -12,12 +12,25 @@
 #include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_heap_caps.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "board_pins.h"
 #include "lcd_panel_st7789_spec.h"
 #include "qmsd_touch.h"
+
+#if CONFIG_YOKE_BSP_SCREEN_LVGL_TASK_STACK_IN_PSRAM
+#define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
+#define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#endif
+
+#if CONFIG_YOKE_BSP_SCREEN_LVGL_DRAW_BUFFER_IN_PSRAM
+#define YOKE_SCREEN_LVGL_DRAW_BUFFER_IN_EXTERNAL_MEMORY 1
+#else
+#define YOKE_SCREEN_LVGL_DRAW_BUFFER_IN_EXTERNAL_MEMORY 0
+#endif
 
 /* LCD size */
 #define LCD_H_RES (240)
@@ -208,6 +221,7 @@ static esp_err_t app_lvgl_init(void) {
         .task_stack = 10240,      /* LVGL task stack size */
         .task_affinity = -1,      /* LVGL task pinned to core (-1 is no affinity) */
         .task_max_sleep_ms = 500, /* Maximum sleep in LVGL task */
+        .task_stack_caps = YOKE_SCREEN_LVGL_TASK_STACK_CAPS,
         .timer_period_ms = 5      /* LVGL timer tick period in ms */
     };
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port initialization failed");
@@ -231,7 +245,7 @@ static esp_err_t app_lvgl_init(void) {
             .mirror_y = true,
         },
         .flags = {
-            .buff_spiram = true,
+            .buff_spiram = YOKE_SCREEN_LVGL_DRAW_BUFFER_IN_EXTERNAL_MEMORY,
             .buff_dma = true,
 #if LVGL_VERSION_MAJOR >= 9
             .swap_bytes = true,
@@ -270,4 +284,3 @@ void screen_draw_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t
 
     esp_lcd_panel_draw_bitmap(lcd_panel, x, y, x + w, y + h, data);
 }
-

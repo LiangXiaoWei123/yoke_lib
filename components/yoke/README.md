@@ -13,6 +13,28 @@ Yoke drivers:
 
 Individual driver headers are also available under `src/`.
 
+## Multiple KEYW modules
+
+`yoke_keyw` is instance-based. Zero-initialize one driver object per physical
+module and give every module its own GPIO pins. Each KEYW instance
+automatically reserves a different LEDC channel.
+
+```c
+yoke_keyw_t key_a = {0}, key_b = {0};
+yoke_keyw_config_t key_a_cfg = yoke_keyw_default_config();
+yoke_keyw_config_t key_b_cfg = yoke_keyw_default_config();
+key_b_cfg.button_gpio_num = GPIO_NUM_4;
+key_b_cfg.led_gpio_num = GPIO_NUM_5;
+ESP_ERROR_CHECK(yoke_keyw_init(&key_a, &key_a_cfg));
+ESP_ERROR_CHECK(yoke_keyw_init(&key_b, &key_b_cfg));
+
+```
+
+The maximum count is limited by the target's available LEDC hardware channels.
+Deinitialize each instance with its matching `yoke_keyw_deinit(&instance)` call
+to release its resources. RGBW WS2812 lights should normally be daisy-chained
+and controlled as one strip by setting `led_num` accordingly.
+
 ## Requirements
 
 * ESP-IDF 5.3 or later

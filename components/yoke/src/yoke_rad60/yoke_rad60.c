@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "freertos/semphr.h"
 #include <string.h>
 
@@ -22,6 +23,28 @@ static EventGroupHandle_t radar_event_group = NULL;
 
 // 雷达任务句柄
 static TaskHandle_t yoke_rad60_task_handle = NULL;
+
+static BaseType_t yoke_rad60_create_task(TaskFunction_t function, const char *name,
+                                         uint32_t stack_size, UBaseType_t priority,
+                                         TaskHandle_t *handle)
+{
+#if CONFIG_YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM
+    return xTaskCreatePinnedToCoreWithCaps(function, name, stack_size, NULL, priority,
+                                           handle, tskNO_AFFINITY,
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return xTaskCreate(function, name, stack_size, NULL, priority, handle);
+#endif
+}
+
+static void yoke_rad60_delete_task(TaskHandle_t task_handle)
+{
+#if CONFIG_YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM
+    vTaskDeleteWithCaps(task_handle);
+#else
+    vTaskDelete(task_handle);
+#endif
+}
 
 // 雷达初始化时间戳(用于给雷达启动留出宽容期)
 static uint32_t radar_init_time_ms = 0;
@@ -674,9 +697,8 @@ esp_err_t yoke_rad60_init(uint8_t uart_num, int16_t tx_pin, int16_t rx_pin, uint
     yoke_rad60_protocol_init(uart_num, tx_pin, rx_pin, boudrate);
 
     // 创建雷达接收处理任务
-    BaseType_t task_ret = xTaskCreate(yoke_rad60_task, "yoke_rad60_task",
-        YOKE_RAD60_TASK_STACK_SIZE, NULL,
-        YOKE_RAD60_TASK_PRIORITY, &yoke_rad60_task_handle);
+    BaseType_t task_ret = yoke_rad60_create_task(yoke_rad60_task, "yoke_rad60_task",
+        YOKE_RAD60_TASK_STACK_SIZE, YOKE_RAD60_TASK_PRIORITY, &yoke_rad60_task_handle);
     if (task_ret != pdPASS) {
         vSemaphoreDelete(radar_mutex);
         vSemaphoreDelete(cmd_send_mutex);
@@ -712,7 +734,7 @@ esp_err_t yoke_rad60_deinit(void) {
     // 必须先删除这个任务，否则它会继续尝试从队列读取数据
     if (yoke_rad60_task_handle != NULL) {
         ESP_LOGI(TAG, "Deleting YOKE_RAD60 radar task...");
-        vTaskDelete(yoke_rad60_task_handle);
+        yoke_rad60_delete_task(yoke_rad60_task_handle);
         yoke_rad60_task_handle = NULL;
         ESP_LOGI(TAG, "YOKE_RAD60 radar task deleted");
     }
@@ -1552,4 +1574,3 @@ esp_err_t yoke_rad60_get_radar_data(yoke_rad60_radar_data_t* data){
 
     return ESP_OK;
 }
-

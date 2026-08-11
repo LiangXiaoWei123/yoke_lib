@@ -11,6 +11,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 
+#include "qmsd_utils.h"
 #include "yoke.h"
 
 const char *TAG = "main";
@@ -132,15 +133,39 @@ static lv_obj_t *s_motor_state_label;
 
 /* KEYW page widgets */
 static lv_obj_t *s_keyw_log_labels[4];
+static lv_obj_t *s_keyw_led_switch;
+static bool s_keyw_led_on = true;
 
 /* KEYW event ring buffer */
-static yoke_keyw_event_t s_keyw_event_log[KEYW_LOG_MAX];
+static button_event_t s_keyw_event_log[KEYW_LOG_MAX];
 static uint8_t s_keyw_event_head;
 static uint8_t s_keyw_event_count;
 static portMUX_TYPE s_keyw_mux = portMUX_INITIALIZER_UNLOCKED;
 
+static const char *keyw_event_to_string(button_event_t event)
+{
+    switch (event) {
+    case BUTTON_PRESS_DOWN: return "press down";
+    case BUTTON_PRESS_UP: return "press up";
+    case BUTTON_PRESS_REPEAT: return "press repeat";
+    case BUTTON_PRESS_REPEAT_DONE: return "press repeat done";
+    case BUTTON_SINGLE_CLICK: return "single click";
+    case BUTTON_DOUBLE_CLICK: return "double click";
+    case BUTTON_MULTIPLE_CLICK: return "multiple click";
+    case BUTTON_LONG_PRESS_START: return "long press start";
+    case BUTTON_LONG_PRESS_HOLD: return "long press hold";
+    case BUTTON_LONG_PRESS_UP: return "long press up";
+    case BUTTON_PRESS_END: return "press end";
+    default: return "unknown";
+    }
+}
+
 static void rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t white)
 {
+    if (!s_rgbw_initialized) {
+        ESP_LOGW(TAG, "RGBW is not initialized; input L or tap Start first");
+        return;
+    }
     esp_err_t ret = yoke_rgbw_set_all(red, green, blue, white);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "RGBW 设置失败: %s", esp_err_to_name(ret));
@@ -160,9 +185,10 @@ static void rgbw_init(void)
         return;
     }
     const ui_if_port_config_t *port = if_port_get_config(s_global_port);
-    yoke_rgbw_config_t config = yoke_rgbw_default_config();
-    config.gpio_num = port->pin_a;
-    config.led_num = 3;
+    const yoke_rgbw_config_t config = {
+        .gpio_num = port->pin_a,
+        .led_num = 3,
+    };
     esp_err_t ret = yoke_rgbw_init(&config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "RGBW init failed: %s", esp_err_to_name(ret));
@@ -190,10 +216,10 @@ static void rgbw_deinit(void)
     ESP_LOGI(TAG, "RGBW deinitialized");
 }
 
-static void keyw_event_callback(yoke_keyw_event_t event, void *user_data)
+static void keyw_event_callback(button_event_t event, void *user_data)
 {
     (void)user_data;
-    ESP_LOGI(TAG, "Yoke-KEYW event: %s", yoke_keyw_event_to_string(event));
+    ESP_LOGI(TAG, "Yoke-KEYW event: %s", keyw_event_to_string(event));
 
     portENTER_CRITICAL(&s_keyw_mux);
     s_keyw_event_log[s_keyw_event_head] = event;
@@ -218,8 +244,19 @@ static void keyw_init(void)
     yoke_keyw_config_t config = yoke_keyw_default_config();
     config.button_gpio_num = port->pin_a;
     config.led_gpio_num = port->pin_b;
-    config.event_cb = keyw_event_callback;
+    config.led_initial_on = s_keyw_led_on;
     esp_err_t ret = yoke_keyw_init(&s_keyw, &config);
+    if (ret == ESP_OK) ret = yoke_keyw_register_event_callback(
+        &s_keyw, BUTTON_PRESS_DOWN, keyw_event_callback, NULL);
+    if (ret == ESP_OK) ret = yoke_keyw_register_event_callback(
+        &s_keyw, BUTTON_PRESS_UP, keyw_event_callback, NULL);
+    if (ret == ESP_OK) ret = yoke_keyw_register_event_callback(
+        &s_keyw, BUTTON_SINGLE_CLICK, keyw_event_callback, NULL);
+    if (ret == ESP_OK) ret = yoke_keyw_register_event_callback(
+        &s_keyw, BUTTON_LONG_PRESS_START, keyw_event_callback, NULL);
+    if (ret == ESP_OK) ret = yoke_keyw_register_event_callback(
+        &s_keyw, BUTTON_LONG_PRESS_UP, keyw_event_callback, NULL);
+    if (ret != ESP_OK && s_keyw.initialized) (void)yoke_keyw_deinit(&s_keyw);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "KEYW init failed: %s", esp_err_to_name(ret));
         return;
@@ -313,7 +350,7 @@ static void print_help(void)
     ESP_LOGI(TAG, "RAD60: i=init, d=read, e=enable, x=disable, u=deinit");
     ESP_LOGI(TAG, "EC11: I=init, K=key, C=count, D=diff, R/G/B/W=color, O=off, U=deinit");
     ESP_LOGI(TAG, "MOTOR: m=init, f=forward, v=reverse, s=coast, q=brake, 1/2/3/4=speed, z=deinit");
-    ESP_LOGI(TAG, "KEYW: k=init, j=deinit (GPIO17 button, GPIO18 PWM LED)");
+    ESP_LOGI(TAG, "KEYW: k=init, j=deinit (GPIO17 button, GPIO18 LED)");
     ESP_LOGI(TAG, "ZXACC: p=init, A=I2C scan, J=status, N=timings, T=set 2000ms, t=timed wake-up");
     ESP_LOGI(TAG, "h=help");
 }
@@ -536,6 +573,15 @@ static void ui_back_click(lv_event_t *event)
     ui_show_page(UI_PAGE_DASHBOARD);
 }
 
+static void ui_page_gesture(lv_event_t *event)
+{
+    (void)event;
+    if (s_current_page != UI_PAGE_DASHBOARD &&
+        lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT) {
+        ui_show_page(UI_PAGE_DASHBOARD);
+    }
+}
+
 static void ui_port_button_click(lv_event_t *event)
 {
     ui_if_port_t port = (ui_if_port_t)(intptr_t)lv_event_get_user_data(event);
@@ -566,6 +612,7 @@ static lv_obj_t *ui_page_container_create(lv_obj_t *screen)
     lv_obj_set_style_pad_all(cont, 0, 0);
     lv_obj_set_scrollbar_mode(cont, LV_SCROLLBAR_MODE_OFF);
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(cont, ui_page_gesture, LV_EVENT_GESTURE, NULL);
     return cont;
 }
 
@@ -632,7 +679,7 @@ static const ui_dash_item_t s_dash_items[] = {
     { "Light",   "RGBW" },
     { "Radar",   "RAD" },
     { "Motor",   "MOTO" },
-    { "Power",   "PWR" },
+    { "System",  "PWR" },
     { "Key",     "KEY" },
 };
 
@@ -724,7 +771,7 @@ static void ui_update_dash_dots(void)
 {
     const bool states[6] = {
         s_ec11_initialized,
-        true,                              /* RGBW always initialized in app_main */
+        s_rgbw_initialized,
         s_radar_initialized,
         s_motor.initialized,
         s_zxacc_maker.initialized,
@@ -796,18 +843,20 @@ static void ui_page_ec11_create(lv_obj_t *parent)
         UI_COLOR_DANGER, UI_COLOR_SUCCESS, UI_COLOR_ACCENT, lv_color_hex(0x94A3B8), UI_COLOR_CARD
     };
     for (int i = 0; i < 5; ++i) {
-        lv_obj_t *btn = ui_make_button(parent, color_labels[i], color_bgs[i], 42, 32);
-        lv_obj_set_pos(btn, 8 + i * 45, 122);
+        lv_obj_t *btn = ui_make_button(parent, color_labels[i], color_bgs[i], 66, 30);
+        int row = i / 3;
+        int col = i % 3;
+        lv_obj_set_pos(btn, 18 + col * 70, 120 + row * 34);
         lv_obj_add_event_cb(btn, ec11_color_click, LV_EVENT_CLICKED,
                             (void *)(intptr_t)i);
     }
 
-    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 90, 34);
-    lv_obj_set_pos(init_btn, 18, 168);
+    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 96, 30);
+    lv_obj_set_pos(init_btn, 18, 202);
     lv_obj_add_event_cb(init_btn, ec11_init_click, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 90, 34);
-    lv_obj_set_pos(deinit_btn, 132, 168);
+    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 96, 30);
+    lv_obj_set_pos(deinit_btn, 126, 202);
     lv_obj_add_event_cb(deinit_btn, ec11_deinit_click, LV_EVENT_CLICKED, NULL);
 }
 
@@ -837,10 +886,51 @@ static void ui_refresh_ec11(void)
 static uint8_t s_rgbw_r, s_rgbw_g, s_rgbw_b, s_rgbw_w;
 static lv_obj_t *s_rgbw_sliders[4];
 static lv_obj_t *s_rgbw_preview;
+static lv_obj_t *s_rgbw_state_label;
+static lv_obj_t *s_rgbw_preset_buttons[4];
+static lv_obj_t *s_rgbw_start_button;
+static lv_obj_t *s_rgbw_stop_button;
+
+static void ui_refresh_rgbw(void)
+{
+    for (int i = 0; i < 4; ++i) {
+        if (s_rgbw_sliders[i] != NULL) {
+            if (s_rgbw_initialized) {
+                lv_obj_remove_state(s_rgbw_sliders[i], LV_STATE_DISABLED);
+            } else {
+                lv_obj_add_state(s_rgbw_sliders[i], LV_STATE_DISABLED);
+            }
+        }
+        if (s_rgbw_preset_buttons[i] != NULL) {
+            if (s_rgbw_initialized) {
+                lv_obj_remove_state(s_rgbw_preset_buttons[i], LV_STATE_DISABLED);
+            } else {
+                lv_obj_add_state(s_rgbw_preset_buttons[i], LV_STATE_DISABLED);
+            }
+        }
+    }
+
+    if (s_rgbw_start_button != NULL) {
+        if (s_rgbw_initialized) lv_obj_add_state(s_rgbw_start_button, LV_STATE_DISABLED);
+        else lv_obj_remove_state(s_rgbw_start_button, LV_STATE_DISABLED);
+    }
+    if (s_rgbw_stop_button != NULL) {
+        if (s_rgbw_initialized) lv_obj_remove_state(s_rgbw_stop_button, LV_STATE_DISABLED);
+        else lv_obj_add_state(s_rgbw_stop_button, LV_STATE_DISABLED);
+    }
+    if (s_rgbw_state_label != NULL) {
+        lv_label_set_text(s_rgbw_state_label,
+                          s_rgbw_initialized ? "Ready" : "Not initialized");
+        lv_obj_set_style_text_color(s_rgbw_state_label,
+                                    s_rgbw_initialized ? UI_COLOR_SUCCESS : UI_COLOR_WARNING, 0);
+    }
+}
 
 static void rgbw_apply(void)
 {
-    rgbw_set_all(s_rgbw_r, s_rgbw_g, s_rgbw_b, s_rgbw_w);
+    if (s_rgbw_initialized) {
+        rgbw_set_all(s_rgbw_r, s_rgbw_g, s_rgbw_b, s_rgbw_w);
+    }
     lv_color_t preview = lv_color_make(s_rgbw_r, s_rgbw_g, s_rgbw_b);
     if (s_rgbw_r == 0 && s_rgbw_g == 0 && s_rgbw_b == 0 && s_rgbw_w > 0) {
         /* White channel: blend pure white toward the background by intensity */
@@ -886,15 +976,20 @@ static void rgbw_control_click(lv_event_t *event)
     int action = (int)(intptr_t)lv_event_get_user_data(event);
     if (action == 0) rgbw_init();
     if (action == 1) rgbw_deinit();
+    ui_refresh_rgbw();
 }
 
 static void ui_page_rgbw_create(lv_obj_t *parent)
 {
     ui_title_bar_create(parent, "RGBW Strip");
 
+    s_rgbw_state_label = lv_label_create(parent);
+    lv_obj_set_pos(s_rgbw_state_label, 12, 48);
+    lv_obj_set_style_text_font(s_rgbw_state_label, &lv_font_montserrat_14, 0);
+
     s_rgbw_preview = lv_obj_create(parent);
-    lv_obj_set_size(s_rgbw_preview, 100, 22);
-    lv_obj_set_pos(s_rgbw_preview, 70, 46);
+    lv_obj_set_size(s_rgbw_preview, 72, 22);
+    lv_obj_set_pos(s_rgbw_preview, 156, 46);
     lv_obj_set_style_bg_color(s_rgbw_preview, lv_color_black(), 0);
     lv_obj_set_style_radius(s_rgbw_preview, 6, 0);
     lv_obj_set_style_border_width(s_rgbw_preview, 0, 0);
@@ -908,11 +1003,11 @@ static void ui_page_rgbw_create(lv_obj_t *parent)
         lv_label_set_text(lbl, channels[i]);
         lv_obj_set_style_text_color(lbl, ch_colors[i], 0);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(lbl, 12, 80 + i * 26);
+        lv_obj_set_pos(lbl, 12, 78 + i * 25);
 
         lv_obj_t *slider = lv_slider_create(parent);
-        lv_obj_set_size(slider, 170, 18);
-        lv_obj_set_pos(slider, 40, 80 + i * 26);
+        lv_obj_set_size(slider, 174, 20);
+        lv_obj_set_pos(slider, 42, 76 + i * 25);
         lv_slider_set_range(slider, 0, 255);
         lv_slider_set_value(slider, 0, LV_ANIM_OFF);
         lv_obj_set_style_bg_color(slider, UI_COLOR_CARD, LV_PART_MAIN);
@@ -927,19 +1022,22 @@ static void ui_page_rgbw_create(lv_obj_t *parent)
         UI_COLOR_DANGER, UI_COLOR_SUCCESS, UI_COLOR_ACCENT, UI_COLOR_CARD
     };
     for (int i = 0; i < 4; ++i) {
-        lv_obj_t *btn = ui_make_button(parent, presets[i], preset_bgs[i], 53, 26);
-        lv_obj_set_pos(btn, 8 + i * 57, 178);
+        lv_obj_t *btn = ui_make_button(parent, presets[i], preset_bgs[i], 50, 30);
+        lv_obj_set_pos(btn, 12 + i * 54, 176);
         lv_obj_add_event_cb(btn, rgbw_preset_click, LV_EVENT_CLICKED,
                             (void *)(intptr_t)i);
+        s_rgbw_preset_buttons[i] = btn;
     }
 
-    lv_obj_t *start_btn = ui_make_button(parent, "Start", UI_COLOR_ACCENT, 94, 28);
-    lv_obj_set_pos(start_btn, 18, 208);
-    lv_obj_add_event_cb(start_btn, rgbw_control_click, LV_EVENT_CLICKED, (void *)0);
+    s_rgbw_start_button = ui_make_button(parent, "Start", UI_COLOR_ACCENT, 100, 28);
+    lv_obj_set_pos(s_rgbw_start_button, 16, 210);
+    lv_obj_add_event_cb(s_rgbw_start_button, rgbw_control_click, LV_EVENT_CLICKED, (void *)0);
 
-    lv_obj_t *stop_btn = ui_make_button(parent, "Stop", UI_COLOR_DANGER, 94, 28);
-    lv_obj_set_pos(stop_btn, 128, 208);
-    lv_obj_add_event_cb(stop_btn, rgbw_control_click, LV_EVENT_CLICKED, (void *)1);
+    s_rgbw_stop_button = ui_make_button(parent, "Stop", UI_COLOR_DANGER, 100, 28);
+    lv_obj_set_pos(s_rgbw_stop_button, 124, 210);
+    lv_obj_add_event_cb(s_rgbw_stop_button, rgbw_control_click, LV_EVENT_CLICKED, (void *)1);
+
+    ui_refresh_rgbw();
 }
 
 /* -------------------- Radar page -------------------- */
@@ -1001,16 +1099,16 @@ static void ui_page_radar_create(lv_obj_t *parent)
     lv_obj_add_event_cb(s_radar_enable_switch, radar_enable_changed,
                         LV_EVENT_VALUE_CHANGED, NULL);
 
-    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 64, 30);
-    lv_obj_set_pos(init_btn, 18, 180);
+    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 68, 36);
+    lv_obj_set_pos(init_btn, 12, 184);
     lv_obj_add_event_cb(init_btn, radar_click, LV_EVENT_CLICKED, (void *)0);
 
-    lv_obj_t *read_btn = ui_make_button(parent, "Read", UI_COLOR_CARD, 64, 30);
-    lv_obj_set_pos(read_btn, 88, 180);
+    lv_obj_t *read_btn = ui_make_button(parent, "Read", UI_COLOR_CARD, 68, 36);
+    lv_obj_set_pos(read_btn, 86, 184);
     lv_obj_add_event_cb(read_btn, radar_click, LV_EVENT_CLICKED, (void *)2);
 
-    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 64, 30);
-    lv_obj_set_pos(deinit_btn, 158, 180);
+    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 68, 36);
+    lv_obj_set_pos(deinit_btn, 160, 184);
     lv_obj_add_event_cb(deinit_btn, radar_click, LV_EVENT_CLICKED, (void *)1);
 }
 
@@ -1096,54 +1194,54 @@ static void ui_page_motor_create(lv_obj_t *parent)
 {
     ui_title_bar_create(parent, "Motor");
 
-    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 50, 26);
-    lv_obj_set_pos(init_btn, 130, 46);
+    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 96, 30);
+    lv_obj_set_pos(init_btn, 18, 48);
     lv_obj_add_event_cb(init_btn, motor_click, LV_EVENT_CLICKED, (void *)0);
 
-    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 50, 26);
-    lv_obj_set_pos(deinit_btn, 184, 46);
+    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 96, 30);
+    lv_obj_set_pos(deinit_btn, 126, 48);
     lv_obj_add_event_cb(deinit_btn, motor_click, LV_EVENT_CLICKED, (void *)1);
 
     s_motor_state_label = lv_label_create(parent);
     lv_label_set_text(s_motor_state_label, "not initialized");
     lv_obj_set_style_text_color(s_motor_state_label, UI_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_motor_state_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(s_motor_state_label, LV_ALIGN_TOP_MID, 0, 78);
+    lv_obj_align(s_motor_state_label, LV_ALIGN_TOP_MID, 0, 84);
 
     lv_obj_t *dir_cap = lv_label_create(parent);
     lv_label_set_text(dir_cap, "DIRECTION");
     lv_obj_set_style_text_color(dir_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(dir_cap, 18, 104);
+    lv_obj_set_pos(dir_cap, 18, 112);
 
     lv_obj_t *fwd_btn = ui_make_button(parent, "Forward", UI_COLOR_ACCENT, 95, 30);
-    lv_obj_set_pos(fwd_btn, 18, 122);
+    lv_obj_set_pos(fwd_btn, 18, 130);
     lv_obj_add_event_cb(fwd_btn, motor_click, LV_EVENT_CLICKED, (void *)2);
 
     lv_obj_t *rev_btn = ui_make_button(parent, "Reverse", UI_COLOR_CARD, 95, 30);
-    lv_obj_set_pos(rev_btn, 125, 122);
+    lv_obj_set_pos(rev_btn, 125, 130);
     lv_obj_add_event_cb(rev_btn, motor_click, LV_EVENT_CLICKED, (void *)3);
 
     lv_obj_t *stop_cap = lv_label_create(parent);
     lv_label_set_text(stop_cap, "STOP");
     lv_obj_set_style_text_color(stop_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(stop_cap, 18, 158);
+    lv_obj_set_pos(stop_cap, 18, 166);
 
     lv_obj_t *coast_btn = ui_make_button(parent, "Coast", UI_COLOR_CARD, 95, 28);
-    lv_obj_set_pos(coast_btn, 18, 176);
+    lv_obj_set_pos(coast_btn, 18, 184);
     lv_obj_add_event_cb(coast_btn, motor_click, LV_EVENT_CLICKED, (void *)4);
 
     lv_obj_t *brake_btn = ui_make_button(parent, "Brake", UI_COLOR_DANGER, 95, 28);
-    lv_obj_set_pos(brake_btn, 125, 176);
+    lv_obj_set_pos(brake_btn, 125, 184);
     lv_obj_add_event_cb(brake_btn, motor_click, LV_EVENT_CLICKED, (void *)5);
 
     lv_obj_t *speed_cap = lv_label_create(parent);
     lv_label_set_text(speed_cap, "SPEED");
     lv_obj_set_style_text_color(speed_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(speed_cap, 18, 196);
+    lv_obj_set_pos(speed_cap, 18, 214);
 
     s_motor_speed_slider = lv_slider_create(parent);
-    lv_obj_set_size(s_motor_speed_slider, 150, 14);
-    lv_obj_set_pos(s_motor_speed_slider, 16, 212);
+    lv_obj_set_size(s_motor_speed_slider, 180, 18);
+    lv_obj_set_pos(s_motor_speed_slider, 16, 232);
     lv_slider_set_range(s_motor_speed_slider, 0, 100);
     lv_slider_set_value(s_motor_speed_slider, s_motor_speed_pct, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_motor_speed_slider, UI_COLOR_CARD, LV_PART_MAIN);
@@ -1183,44 +1281,49 @@ static void zxacc_timer_changed(lv_event_t *event)
 
 static void ui_page_zxacc_create(lv_obj_t *parent)
 {
-    ui_title_bar_create(parent, "Power");
+    ui_title_bar_create(parent, "System");
+
+    lv_obj_t *section = lv_label_create(parent);
+    lv_label_set_text(section, "PWR  Power management");
+    lv_obj_set_style_text_color(section, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_pos(section, 18, 48);
 
     s_zxacc_voltage_label = lv_label_create(parent);
     lv_label_set_text(s_zxacc_voltage_label, "--.--V");
     lv_obj_set_style_text_color(s_zxacc_voltage_label, UI_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_zxacc_voltage_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(s_zxacc_voltage_label, LV_ALIGN_TOP_MID, 0, 42);
+    lv_obj_align(s_zxacc_voltage_label, LV_ALIGN_TOP_MID, 0, 62);
 
     s_zxacc_charge_label = lv_label_create(parent);
     lv_label_set_text(s_zxacc_charge_label, "not initialized");
     lv_obj_set_style_text_color(s_zxacc_charge_label, UI_COLOR_SUBTEXT, 0);
-    lv_obj_align(s_zxacc_charge_label, LV_ALIGN_TOP_MID, 0, 72);
+    lv_obj_align(s_zxacc_charge_label, LV_ALIGN_TOP_MID, 0, 90);
 
     s_zxacc_timing_label = lv_label_create(parent);
     lv_label_set_text(s_zxacc_timing_label, "Key hold: -- / -- ms");
     lv_obj_set_style_text_color(s_zxacc_timing_label, UI_COLOR_SUBTEXT, 0);
-    lv_obj_align(s_zxacc_timing_label, LV_ALIGN_TOP_MID, 0, 92);
+    lv_obj_align(s_zxacc_timing_label, LV_ALIGN_TOP_MID, 0, 108);
 
-    lv_obj_t *set_btn = ui_make_button(parent, "Key hold = 2000 ms", UI_COLOR_ACCENT, 150, 24);
-    lv_obj_set_pos(set_btn, 45, 114);
+    lv_obj_t *set_btn = ui_make_button(parent, "Key hold: 2000 ms", UI_COLOR_ACCENT, 180, 30);
+    lv_obj_set_pos(set_btn, 30, 128);
     lv_obj_add_event_cb(set_btn, zxacc_click, LV_EVENT_CLICKED, (void *)2);
 
-    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 88, 24);
-    lv_obj_set_pos(init_btn, 24, 142);
+    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 94, 30);
+    lv_obj_set_pos(init_btn, 18, 164);
     lv_obj_add_event_cb(init_btn, zxacc_click, LV_EVENT_CLICKED, (void *)0);
 
-    lv_obj_t *scan_btn = ui_make_button(parent, "Scan", UI_COLOR_CARD, 88, 24);
-    lv_obj_set_pos(scan_btn, 128, 142);
+    lv_obj_t *scan_btn = ui_make_button(parent, "Scan", UI_COLOR_CARD, 94, 30);
+    lv_obj_set_pos(scan_btn, 128, 164);
     lv_obj_add_event_cb(scan_btn, zxacc_click, LV_EVENT_CLICKED, (void *)1);
 
     lv_obj_t *timer_cap = lv_label_create(parent);
     lv_label_set_text(timer_cap, "WAKE TIMER");
     lv_obj_set_style_text_color(timer_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(timer_cap, 16, 170);
+    lv_obj_set_pos(timer_cap, 16, 200);
 
     s_zxacc_timer_slider = lv_slider_create(parent);
-    lv_obj_set_size(s_zxacc_timer_slider, 86, 14);
-    lv_obj_set_pos(s_zxacc_timer_slider, 16, 188);
+    lv_obj_set_size(s_zxacc_timer_slider, 92, 16);
+    lv_obj_set_pos(s_zxacc_timer_slider, 16, 218);
     lv_slider_set_range(s_zxacc_timer_slider, 0, 60);
     lv_slider_set_value(s_zxacc_timer_slider, 10, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_zxacc_timer_slider, UI_COLOR_CARD, LV_PART_MAIN);
@@ -1230,10 +1333,10 @@ static void ui_page_zxacc_create(lv_obj_t *parent)
     s_zxacc_timer_label = lv_label_create(parent);
     lv_label_set_text(s_zxacc_timer_label, "10 min");
     lv_obj_set_style_text_color(s_zxacc_timer_label, UI_COLOR_TEXT, 0);
-    lv_obj_set_pos(s_zxacc_timer_label, 108, 186);
+    lv_obj_set_pos(s_zxacc_timer_label, 116, 216);
 
-    lv_obj_t *sleep_btn = ui_make_button(parent, "Sleep", UI_COLOR_DANGER, 54, 24);
-    lv_obj_set_pos(sleep_btn, 170, 188);
+    lv_obj_t *sleep_btn = ui_make_button(parent, "Sleep", UI_COLOR_DANGER, 64, 24);
+    lv_obj_set_pos(sleep_btn, 160, 212);
     lv_obj_add_event_cb(sleep_btn, zxacc_click, LV_EVENT_CLICKED, (void *)3);
 }
 
@@ -1304,9 +1407,6 @@ static void ui_update_status_bar(void)
 
 /* -------------------- KEYW page -------------------- */
 
-static lv_obj_t *s_keyw_brightness_slider;
-static uint8_t s_keyw_brightness_pct = 10;
-
 static void ui_refresh_keyw(void)
 {
     uint8_t count;
@@ -1319,21 +1419,20 @@ static void ui_refresh_keyw(void)
     for (int i = 0; i < 4; ++i) {
         if (i < count) {
             uint8_t idx = (head - 1 - i + KEYW_LOG_MAX) % KEYW_LOG_MAX;
-            yoke_keyw_event_t event = s_keyw_event_log[idx];
+            button_event_t event = s_keyw_event_log[idx];
             lv_label_set_text_fmt(s_keyw_log_labels[i], "%u. %s",
-                                  (unsigned)(count - i), yoke_keyw_event_to_string(event));
+                                  (unsigned)(count - i), keyw_event_to_string(event));
         } else {
             lv_label_set_text(s_keyw_log_labels[i], "");
         }
     }
 }
 
-static void keyw_brightness_changed(lv_event_t *event)
+static void keyw_led_changed(lv_event_t *event)
 {
-    lv_obj_t *slider = lv_event_get_target(event);
-    s_keyw_brightness_pct = lv_slider_get_value(slider);
+    s_keyw_led_on = lv_obj_has_state(lv_event_get_target(event), LV_STATE_CHECKED);
     if (s_keyw.initialized) {
-        yoke_keyw_set_led_brightness(&s_keyw, s_keyw_brightness_pct);
+        yoke_keyw_set_led(&s_keyw, s_keyw_led_on);
     }
 }
 
@@ -1349,19 +1448,14 @@ static void ui_page_keyw_create(lv_obj_t *parent)
     ui_title_bar_create(parent, "Key");
 
     lv_obj_t *led_cap = lv_label_create(parent);
-    lv_label_set_text(led_cap, "LED brightness");
+    lv_label_set_text(led_cap, "LED");
     lv_obj_set_style_text_color(led_cap, UI_COLOR_SUBTEXT, 0);
     lv_obj_set_pos(led_cap, 18, 54);
 
-    s_keyw_brightness_slider = lv_slider_create(parent);
-    lv_obj_set_size(s_keyw_brightness_slider, 150, 16);
-    lv_obj_set_pos(s_keyw_brightness_slider, 20, 74);
-    lv_slider_set_range(s_keyw_brightness_slider, 0, 100);
-    lv_slider_set_value(s_keyw_brightness_slider, 10, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(s_keyw_brightness_slider, UI_COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_keyw_brightness_slider, UI_COLOR_ACCENT, LV_PART_INDICATOR);
-    lv_obj_add_event_cb(s_keyw_brightness_slider, keyw_brightness_changed,
-                        LV_EVENT_VALUE_CHANGED, NULL);
+    s_keyw_led_switch = lv_switch_create(parent);
+    lv_obj_set_pos(s_keyw_led_switch, 18, 74);
+    lv_obj_add_state(s_keyw_led_switch, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_keyw_led_switch, keyw_led_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *log_cap = lv_label_create(parent);
     lv_label_set_text(log_cap, "EVENTS");
@@ -1390,6 +1484,7 @@ static void ui_timer_200ms(lv_timer_t *timer)
 {
     (void)timer;
     if (s_current_page == UI_PAGE_EC11) ui_refresh_ec11();
+    if (s_current_page == UI_PAGE_RGBW) ui_refresh_rgbw();
     if (s_current_page == UI_PAGE_MOTOR) ui_refresh_motor();
     if (s_current_page == UI_PAGE_KEYW) ui_refresh_keyw();
     ui_update_dash_dots();
@@ -1787,7 +1882,8 @@ void app_main(void)
             } else if(input == 'U'){
                 ec11_deinit();
             } else if(input == 'm'){
-                motor_init();
+                qmsd_debug_heap_print(MALLOC_CAP_INTERNAL, 0);
+                qmsd_debug_heap_print(MALLOC_CAP_SPIRAM, 0);
             } else if(input == 'f'){
                 motor_drive(true);
             } else if(input == 'v'){
@@ -1826,6 +1922,8 @@ void app_main(void)
                 keyw_init();
             } else if(input == 'j'){
                 keyw_deinit();
+            } else if(input == 'M'){
+                motor_init();
             } else {
                 ESP_LOGW(TAG, "unknown command: %c", input);
             }

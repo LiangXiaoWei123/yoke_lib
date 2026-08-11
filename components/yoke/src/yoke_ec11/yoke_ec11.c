@@ -217,7 +217,7 @@ esp_err_t yoke_ec11_enter_test_mode(const yoke_ec11_t *yoke)
 esp_err_t yoke_ec11_configure_slave_address(const yoke_ec11_t *yoke, uint8_t address_low_3bits)
 {
     if (address_low_3bits > 0x07U) return ESP_ERR_INVALID_ARG;
-    /* CTRL2 位定义：1 !A2 !A1 !A0 0 A2 A1 A0。 */
+    /* CTRL2 bit layout: 1 !A2 !A1 !A0 0 A2 A1 A0. */
     uint8_t ctrl2 = (uint8_t)(0x80U | (((~address_low_3bits) & 0x07U) << 4) | address_low_3bits);
     return yoke_write(yoke, YOKE_REG_CTRL2, &ctrl2, 1U);
 }
@@ -234,4 +234,3 @@ esp_err_t yoke_ec11_set_active_address(yoke_ec11_t *yoke, uint8_t device_address
     }
     return ret;
 }
-

@@ -56,14 +56,6 @@ static size_t yoke_rgbw_encode(const void *data, size_t data_size, size_t symbol
     return 8;
 }
 
-yoke_rgbw_config_t yoke_rgbw_default_config(void)
-{
-    return (yoke_rgbw_config_t){
-        .gpio_num = GPIO_NUM_NC,
-        .led_num = 0,
-    };
-}
-
 esp_err_t yoke_rgbw_init(const yoke_rgbw_config_t *config)
 {
     if (config == NULL || config->gpio_num == GPIO_NUM_NC || config->led_num == 0U) {
@@ -138,4 +130,3 @@ esp_err_t yoke_rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t wh
     esp_err_t ret = rmt_transmit(s_channel, s_encoder, s_pixels, s_pixels_size, &config);
     return ret == ESP_OK ? rmt_tx_wait_all_done(s_channel, portMAX_DELAY) : ret;
 }
-

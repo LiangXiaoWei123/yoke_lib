@@ -1,5 +1,6 @@
 /** @file yoke_rad60_protocol.c */
 #include "yoke_rad60_protocol.h"
+#include "sdkconfig.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -9,15 +10,34 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "esp_heap_caps.h"
 static BaseType_t yoke_rad60_protocol_create_task(
     TaskFunction_t function, const char *name, uint32_t stack_size, void *argument,
     UBaseType_t priority, TaskHandle_t *handle, BaseType_t core_id, bool stack_in_psram)
 {
-    (void)core_id;
+#if CONFIG_YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM
+    if (stack_in_psram) {
+        return xTaskCreatePinnedToCoreWithCaps(function, name, stack_size, argument,
+                                               priority, handle, core_id,
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+#else
     (void)stack_in_psram;
+#endif
     return xTaskCreate(function, name, stack_size, argument, priority, handle);
 }
-#include "sdkconfig.h"
+
+static void yoke_rad60_protocol_delete_task(TaskHandle_t task_handle)
+{
+#if CONFIG_YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM
+    if (task_handle == NULL) {
+        task_handle = xTaskGetCurrentTaskHandle();
+    }
+    vTaskDeleteWithCaps(task_handle);
+#else
+    vTaskDelete(task_handle);
+#endif
+}
 #include "string.h"
 
 #define TAG "UART_Protocol"
@@ -75,7 +95,7 @@ void yoke_rad60_protocol_deinit(void) {
     if (uart_send_task_handle != NULL) {
         ESP_LOGI(TAG, "Deleting UART send task (stack=2KB)...");
 
-        vTaskDelete(uart_send_task_handle);
+        yoke_rad60_protocol_delete_task(uart_send_task_handle);
         uart_send_task_handle = NULL;
         has_tasks = true;
         ESP_LOGI(TAG, "UART send task deleted");
@@ -85,7 +105,7 @@ void yoke_rad60_protocol_deinit(void) {
     if (uart_frame_task_handle != NULL) {
         ESP_LOGI(TAG, "Deleting UART frame task (stack=3KB)...");
 
-        vTaskDelete(uart_frame_task_handle);
+        yoke_rad60_protocol_delete_task(uart_frame_task_handle);
         uart_frame_task_handle = NULL;
         has_tasks = true;
         ESP_LOGI(TAG, "UART frame task deleted");
@@ -641,5 +661,5 @@ static void uart_frame_task(void* arg) {
             }
         }
     }
-    vTaskDelete(NULL);
+    yoke_rad60_protocol_delete_task(NULL);
 }
