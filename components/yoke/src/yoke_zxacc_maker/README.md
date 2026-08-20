@@ -29,7 +29,7 @@ ZXACC-maker 是带 PY32F002B 从机的电源管理底板。ESP32-S3 通过 I2C �
 | `0x07` | 写 | `0x01` | 立即关机 | `shutdown()` |
 | `0x08` | 读/写 | `uint16_t` | 按键开机长按时长，单位 ms | `get/set_wakeup_time()` |
 | `0x0A` | 读/写 | `uint16_t` | 按键关机长按时长，单位 ms | `get/set_shutdown_time()` |
-| `0x0C` | 写 | `uint32_t` | 定时唤醒秒数；写入后底板进入低功耗 | `set_timer_wakeup()` |
+| `0x0C` | 写 | `uint32_t` | 定时唤醒秒数；写入后底板进入低功耗，到达设定的时间后自动唤醒 | `set_timer_wakeup()` |
 
 `0x07` 与 `0x0C` 会改变供电状态，调试时请确认串口和程序下载工具不会因此断开。
 

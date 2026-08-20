@@ -16,9 +16,10 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "board_pins.h"
 #include "lcd_panel_st7789_spec.h"
-#include "qmsd_touch.h"
 
 #if CONFIG_YOKE_BSP_SCREEN_LVGL_TASK_STACK_IN_PSRAM
 #define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
@@ -44,6 +45,12 @@
 #define LCD_BITS_PER_PIXEL (16)
 #define LCD_DRAW_BUFF_DOUBLE (1)
 #define LCD_BL_ON_LEVEL (1)
+
+/* CST816T touch settings */
+#define TOUCH_I2C_PORT I2C_NUM_1
+#define TOUCH_I2C_CLOCK_HZ 400000
+#define TOUCH_I2C_ADDRESS 0x15
+#define TOUCH_I2C_TIMEOUT_MS 20
 
 /* LCD pins */
 #define LCD_GPIO_SCLK (BOARD_PIN_LCD_SCLK)
@@ -103,7 +110,74 @@ static esp_lcd_panel_handle_t lcd_panel = NULL;
 
 /* LVGL display and touch */
 static lv_display_t* lvgl_disp = NULL;
-static lv_indev_t* lvgl_touch_indev = NULL;
+static i2c_master_bus_handle_t touch_i2c_bus = NULL;
+static i2c_master_dev_handle_t touch_i2c_device = NULL;
+static bool touch_owns_i2c_bus;
+
+static esp_err_t touch_init(void)
+{
+    if (touch_i2c_device != NULL) return ESP_ERR_INVALID_STATE;
+
+    const gpio_config_t reset_config = {
+        .pin_bit_mask = 1ULL << BOARD_PIN_TOUCH_RST,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&reset_config), TAG, "Touch reset GPIO configuration failed");
+    ESP_RETURN_ON_ERROR(gpio_set_level(BOARD_PIN_TOUCH_RST, 0), TAG, "Touch reset assert failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_RETURN_ON_ERROR(gpio_set_level(BOARD_PIN_TOUCH_RST, 1), TAG, "Touch reset release failed");
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    esp_err_t ret = i2c_master_get_bus_handle(TOUCH_I2C_PORT, &touch_i2c_bus);
+    if (ret == ESP_ERR_INVALID_STATE) {
+        const i2c_master_bus_config_t bus_config = {
+            .i2c_port = TOUCH_I2C_PORT,
+            .scl_io_num = BOARD_PIN_TOUCH_I2C_SCL,
+            .sda_io_num = BOARD_PIN_TOUCH_I2C_SDA,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .flags.enable_internal_pullup = true,
+        };
+        ret = i2c_new_master_bus(&bus_config, &touch_i2c_bus);
+        if (ret == ESP_OK) touch_owns_i2c_bus = true;
+    }
+    ESP_RETURN_ON_ERROR(ret, TAG, "Touch I2C bus initialization failed");
+
+    const i2c_device_config_t device_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = TOUCH_I2C_ADDRESS,
+        .scl_speed_hz = TOUCH_I2C_CLOCK_HZ,
+    };
+    ret = i2c_master_bus_add_device(touch_i2c_bus, &device_config, &touch_i2c_device);
+    if (ret != ESP_OK) {
+        if (touch_owns_i2c_bus) (void)i2c_del_master_bus(touch_i2c_bus);
+        touch_i2c_bus = NULL;
+        touch_owns_i2c_bus = false;
+    }
+    return ret;
+}
+
+static bool touch_read(uint16_t *x, uint16_t *y)
+{
+    if (touch_i2c_device == NULL || x == NULL || y == NULL) return false;
+
+    uint8_t data[6] = {0};
+    const uint8_t register_address = 0x01;
+    if (i2c_master_transmit_receive(touch_i2c_device, &register_address,
+                                    sizeof(register_address), data, sizeof(data),
+                                    TOUCH_I2C_TIMEOUT_MS) != ESP_OK || data[1] == 0) {
+        return false;
+    }
+
+    uint16_t raw_x = ((uint16_t)(data[2] & 0x0f) << 8) | data[3];
+    uint16_t raw_y = ((uint16_t)(data[4] & 0x0f) << 8) | data[5];
+    if (raw_x >= LCD_H_RES || raw_y >= LCD_V_RES) return false;
+
+    /* Board orientation: mirror both axes, matching the previous touch configuration. */
+    *x = LCD_H_RES - raw_x - 1;
+    *y = LCD_V_RES - raw_y - 1;
+    return true;
+}
 
 static esp_err_t app_lcd_init(void) {
     esp_err_t ret = ESP_OK;
@@ -172,37 +246,20 @@ err:
 }
 
 static void lvgl_port_touchpad_read(lv_indev_t* indev, lv_indev_data_t* data) {
-    uint8_t press = 0;
-    touch_panel_points_t point;
-    touch_read_points(&point);
-    press = point.event;
-    if (press == TOUCH_EVT_PRESS) {
-        data->point.x = point.curx[0];
-        data->point.y = point.cury[0];
+    (void)indev;
+    uint16_t x;
+    uint16_t y;
+    if (touch_read(&x, &y)) {
+        data->point.x = x;
+        data->point.y = y;
         data->state = LV_INDEV_STATE_PR;
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
 }
 
-static void lvgl_tp_init(lv_display_t* disp) {
-    touch_panel_config_t config = {
-        .i2c_num = 1,
-        .rst_pin = BOARD_PIN_TOUCH_RST,
-        .sda_pin = BOARD_PIN_TOUCH_I2C_SDA,
-        .scl_pin = BOARD_PIN_TOUCH_I2C_SCL,
-        .intr_pin = BOARD_PIN_TOUCH_GPIO_INT,
-        .i2c_freq = 400000,
-        .width = 240,
-        .height = 240,
-        .direction = TOUCH_MIRROR_X | TOUCH_MIRROR_Y,
-        .task_en = 1,
-        .task_priority = 6,
-        .task_core = 1,
-        .task_stack_size = 4096,
-    };
-    touch_panel_driver_t* touch_panel = &touch_cst816t_driver;
-    touch_init(touch_panel, &config);
+static esp_err_t lvgl_tp_init(lv_display_t* disp) {
+    ESP_RETURN_ON_ERROR(touch_init(), TAG, "Touch initialization failed");
 
     lvgl_port_lock(0);
     /* Register a touchpad input device */
@@ -210,8 +267,8 @@ static void lvgl_tp_init(lv_display_t* disp) {
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, lvgl_port_touchpad_read);
     lv_indev_set_disp(indev, disp);
-    lv_indev_set_driver_data(indev, touch_panel);
     lvgl_port_unlock();
+    return ESP_OK;
 }
 
 static esp_err_t app_lvgl_init(void) {
@@ -258,7 +315,7 @@ static esp_err_t app_lvgl_init(void) {
         ESP_LOGE(TAG, "LVGL display buffer allocation failed");
         return ESP_ERR_NO_MEM;
     }
-    lvgl_tp_init(lvgl_disp);
+    ESP_RETURN_ON_ERROR(lvgl_tp_init(lvgl_disp), TAG, "Touch setup failed");
 
     return ESP_OK;
 }
@@ -277,7 +334,8 @@ lv_display_t* screen_with_lvgl_init(void) {
     return lvgl_disp;
 }
 
-void screen_draw_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t* data) {
+void screen_draw_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                        const uint16_t *data) {
     if (x + w > LCD_H_RES || y + h > LCD_V_RES) {
         ESP_LOGE(TAG, "x + w or y + h must be less than 460, but x: %d, y: %d, w: %d, h: %d", x, y, w, h);
     }

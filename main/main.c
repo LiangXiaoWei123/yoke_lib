@@ -11,7 +11,6 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 
-#include "qmsd_utils.h"
 #include "yoke.h"
 
 const char *TAG = "main";
@@ -124,9 +123,11 @@ static lv_obj_t *s_radar_obj_labels[2];
 static lv_obj_t *s_radar_enable_switch;
 
 /* ZXACC page widgets */
+static lv_obj_t *s_zxacc_version_label;
 static lv_obj_t *s_zxacc_voltage_label;
 static lv_obj_t *s_zxacc_charge_label;
-static lv_obj_t *s_zxacc_timing_label;
+static lv_obj_t *s_zxacc_shutdown_label;
+static uint32_t s_zxacc_shutdown_seconds = 0;
 
 /* Motor page widgets */
 static lv_obj_t *s_motor_state_label;
@@ -342,17 +343,6 @@ static void ui_refresh_port_selector(void)
         lv_obj_set_style_bg_color(btn, lv_color_darken(UI_COLOR_CARD, 15), LV_STATE_DISABLED);
     }
 
-}
-
-static void print_help(void)
-{
-    ESP_LOGI(TAG, "RGBW: L=init, l=deinit, r=red, g=green, b=blue, w=white, o=off");
-    ESP_LOGI(TAG, "RAD60: i=init, d=read, e=enable, x=disable, u=deinit");
-    ESP_LOGI(TAG, "EC11: I=init, K=key, C=count, D=diff, R/G/B/W=color, O=off, U=deinit");
-    ESP_LOGI(TAG, "MOTOR: m=init, f=forward, v=reverse, s=coast, q=brake, 1/2/3/4=speed, z=deinit");
-    ESP_LOGI(TAG, "KEYW: k=init, j=deinit (GPIO17 button, GPIO18 LED)");
-    ESP_LOGI(TAG, "ZXACC: p=init, A=I2C scan, J=status, N=timings, T=set 2000ms, t=timed wake-up");
-    ESP_LOGI(TAG, "h=help");
 }
 
 static bool zxacc_maker_is_ready(void)
@@ -757,7 +747,7 @@ static void ui_page_dashboard_create(lv_obj_t *parent)
 
         s_dash_dots[i] = ui_make_dot(card, 88, 7, UI_COLOR_CARD);
         s_dash_state_labels[i] = lv_label_create(card);
-        lv_label_set_text(s_dash_state_labels[i], "offline");
+        lv_label_set_text(s_dash_state_labels[i], "");
         lv_obj_set_style_text_color(s_dash_state_labels[i], UI_COLOR_SUBTEXT, 0);
         lv_obj_set_style_text_font(s_dash_state_labels[i], &lv_font_montserrat_14, 0);
         lv_obj_set_pos(s_dash_state_labels[i], 40, 5);
@@ -780,7 +770,7 @@ static void ui_update_dash_dots(void)
     for (int i = 0; i < 6; ++i) {
         lv_obj_set_style_bg_color(s_dash_dots[i],
                                   states[i] ? UI_COLOR_SUCCESS : UI_COLOR_CARD, 0);
-        lv_label_set_text(s_dash_state_labels[i], states[i] ? "ready" : "offline");
+        // lv_label_set_text(s_dash_state_labels[i], states[i] ? "ready" : "offline");
         lv_obj_set_style_text_color(s_dash_state_labels[i],
                                     states[i] ? UI_COLOR_SUCCESS : UI_COLOR_SUBTEXT, 0);
     }
@@ -1251,32 +1241,29 @@ static void ui_page_motor_create(lv_obj_t *parent)
 
 /* -------------------- ZXACC page -------------------- */
 
-static lv_obj_t *s_zxacc_timer_slider;
-static lv_obj_t *s_zxacc_timer_label;
-
 static void zxacc_click(lv_event_t *event)
 {
     int action = (int)(intptr_t)lv_event_get_user_data(event);
-    if (action == 0) zxacc_maker_init();
-    if (action == 1) zxacc_maker_scan();
-    if (action == 2) zxacc_maker_set_default_timings();
-    if (action == 3) {
-        uint32_t minutes = lv_slider_get_value(s_zxacc_timer_slider);
-        if (minutes == 0) {
-            ESP_LOGW(TAG, "Timer wake-up requires at least 1 second");
-            return;
+    if (action == 0) {
+        esp_err_t ret = yoke_zxacc_maker_set_timer_wakeup(&s_zxacc_maker,
+                                                           s_zxacc_shutdown_seconds);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "ZXACC-maker shutdown timer set to %lu seconds",
+                     (unsigned long)s_zxacc_shutdown_seconds);
+        } else {
+            ESP_LOGE(TAG, "ZXACC-maker shutdown timer write failed: %s",
+                     esp_err_to_name(ret));
         }
-        ESP_LOGW(TAG, "Setting timed wake-up to %lu second(s); entering low-power now",
-                 (unsigned long)minutes * 60);
-        yoke_zxacc_maker_set_timer_wakeup(&s_zxacc_maker, minutes * 60);
+        return;
     }
-}
 
-static void zxacc_timer_changed(lv_event_t *event)
-{
-    (void)event;
-    lv_label_set_text_fmt(s_zxacc_timer_label, "%lu min",
-                          (unsigned long)lv_slider_get_value(s_zxacc_timer_slider));
+    if (action == 1 && s_zxacc_shutdown_seconds > 10) {
+        s_zxacc_shutdown_seconds -= 10;
+    } else if (action == 2 && s_zxacc_shutdown_seconds < 3600) {
+        s_zxacc_shutdown_seconds += 10;
+    }
+    lv_label_set_text_fmt(s_zxacc_shutdown_label, "%lu s",
+                          (unsigned long)s_zxacc_shutdown_seconds);
 }
 
 static void ui_page_zxacc_create(lv_obj_t *parent)
@@ -1284,77 +1271,79 @@ static void ui_page_zxacc_create(lv_obj_t *parent)
     ui_title_bar_create(parent, "System");
 
     lv_obj_t *section = lv_label_create(parent);
-    lv_label_set_text(section, "PWR  Power management");
+    lv_label_set_text(section, "POWER MANAGEMENT");
     lv_obj_set_style_text_color(section, UI_COLOR_SUBTEXT, 0);
     lv_obj_set_pos(section, 18, 48);
 
+    s_zxacc_version_label = lv_label_create(parent);
+    lv_label_set_text(s_zxacc_version_label, "Version: 0x----");
+    lv_obj_set_style_text_color(s_zxacc_version_label, UI_COLOR_TEXT, 0);
+    lv_obj_align(s_zxacc_version_label, LV_ALIGN_TOP_MID, 0, 68);
+
     s_zxacc_voltage_label = lv_label_create(parent);
-    lv_label_set_text(s_zxacc_voltage_label, "--.--V");
+    lv_label_set_text(s_zxacc_voltage_label, "--.-- V");
     lv_obj_set_style_text_color(s_zxacc_voltage_label, UI_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_zxacc_voltage_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(s_zxacc_voltage_label, LV_ALIGN_TOP_MID, 0, 62);
+    lv_obj_align(s_zxacc_voltage_label, LV_ALIGN_TOP_MID, 0, 88);
 
     s_zxacc_charge_label = lv_label_create(parent);
-    lv_label_set_text(s_zxacc_charge_label, "not initialized");
+    lv_label_set_text(s_zxacc_charge_label, "Charge: unavailable");
     lv_obj_set_style_text_color(s_zxacc_charge_label, UI_COLOR_SUBTEXT, 0);
-    lv_obj_align(s_zxacc_charge_label, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_align(s_zxacc_charge_label, LV_ALIGN_TOP_MID, 0, 122);
 
-    s_zxacc_timing_label = lv_label_create(parent);
-    lv_label_set_text(s_zxacc_timing_label, "Key hold: -- / -- ms");
-    lv_obj_set_style_text_color(s_zxacc_timing_label, UI_COLOR_SUBTEXT, 0);
-    lv_obj_align(s_zxacc_timing_label, LV_ALIGN_TOP_MID, 0, 108);
+    lv_obj_t *shutdown_cap = lv_label_create(parent);
+    lv_label_set_text(shutdown_cap, "SHUTDOWN TIMER");
+    lv_obj_set_style_text_color(shutdown_cap, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_pos(shutdown_cap, 18, 154);
 
-    lv_obj_t *set_btn = ui_make_button(parent, "Key hold: 2000 ms", UI_COLOR_ACCENT, 180, 30);
-    lv_obj_set_pos(set_btn, 30, 128);
-    lv_obj_add_event_cb(set_btn, zxacc_click, LV_EVENT_CLICKED, (void *)2);
+    lv_obj_t *decrease_btn = ui_make_button(parent, "-", UI_COLOR_CARD, 46, 30);
+    lv_obj_set_pos(decrease_btn, 18, 176);
+    lv_obj_add_event_cb(decrease_btn, zxacc_click, LV_EVENT_CLICKED, (void *)1);
 
-    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 94, 30);
-    lv_obj_set_pos(init_btn, 18, 164);
-    lv_obj_add_event_cb(init_btn, zxacc_click, LV_EVENT_CLICKED, (void *)0);
+    s_zxacc_shutdown_label = lv_label_create(parent);
+    lv_label_set_text(s_zxacc_shutdown_label, "0 s");
+    lv_obj_set_style_text_color(s_zxacc_shutdown_label, UI_COLOR_TEXT, 0);
+    lv_obj_set_width(s_zxacc_shutdown_label, 120);
+    lv_obj_set_style_text_align(s_zxacc_shutdown_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(s_zxacc_shutdown_label, 60, 182);
 
-    lv_obj_t *scan_btn = ui_make_button(parent, "Scan", UI_COLOR_CARD, 94, 30);
-    lv_obj_set_pos(scan_btn, 128, 164);
-    lv_obj_add_event_cb(scan_btn, zxacc_click, LV_EVENT_CLICKED, (void *)1);
+    lv_obj_t *increase_btn = ui_make_button(parent, "+", UI_COLOR_CARD, 46, 30);
+    lv_obj_set_pos(increase_btn, 176, 176);
+    lv_obj_add_event_cb(increase_btn, zxacc_click, LV_EVENT_CLICKED, (void *)2);
 
-    lv_obj_t *timer_cap = lv_label_create(parent);
-    lv_label_set_text(timer_cap, "WAKE TIMER");
-    lv_obj_set_style_text_color(timer_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(timer_cap, 16, 200);
-
-    s_zxacc_timer_slider = lv_slider_create(parent);
-    lv_obj_set_size(s_zxacc_timer_slider, 92, 16);
-    lv_obj_set_pos(s_zxacc_timer_slider, 16, 218);
-    lv_slider_set_range(s_zxacc_timer_slider, 0, 60);
-    lv_slider_set_value(s_zxacc_timer_slider, 10, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(s_zxacc_timer_slider, UI_COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_zxacc_timer_slider, UI_COLOR_WARNING, LV_PART_INDICATOR);
-    lv_obj_add_event_cb(s_zxacc_timer_slider, zxacc_timer_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-    s_zxacc_timer_label = lv_label_create(parent);
-    lv_label_set_text(s_zxacc_timer_label, "10 min");
-    lv_obj_set_style_text_color(s_zxacc_timer_label, UI_COLOR_TEXT, 0);
-    lv_obj_set_pos(s_zxacc_timer_label, 116, 216);
-
-    lv_obj_t *sleep_btn = ui_make_button(parent, "Sleep", UI_COLOR_DANGER, 64, 24);
-    lv_obj_set_pos(sleep_btn, 160, 212);
-    lv_obj_add_event_cb(sleep_btn, zxacc_click, LV_EVENT_CLICKED, (void *)3);
+    lv_obj_t *set_btn = ui_make_button(parent, "Set timer", UI_COLOR_ACCENT, 150, 30);
+    lv_obj_set_pos(set_btn, 45, 212);
+    lv_obj_add_event_cb(set_btn, zxacc_click, LV_EVENT_CLICKED, (void *)0);
 }
 
 static void ui_refresh_zxacc(void)
 {
     if (!s_zxacc_maker.initialized) {
-        lv_label_set_text(s_zxacc_voltage_label, "--.--V");
-        lv_label_set_text(s_zxacc_charge_label, "not initialized");
-        lv_label_set_text(s_zxacc_timing_label, "Key hold: -- / -- ms");
+        lv_label_set_text(s_zxacc_version_label, "Version: 0x----");
+        lv_label_set_text(s_zxacc_voltage_label, "--.-- V");
+        lv_label_set_text(s_zxacc_charge_label, "Charge: unavailable");
         return;
     }
 
+    uint16_t firmware_version = 0;
     uint32_t voltage_mv = 0;
     yoke_zxacc_maker_charge_state_t charge_state = YOKE_ZXACC_MAKER_CHARGE_UNKNOWN;
-    yoke_zxacc_maker_get_battery_voltage(&s_zxacc_maker, &voltage_mv);
+    esp_err_t version_ret = yoke_zxacc_maker_get_firmware_version(&s_zxacc_maker,
+                                                                    &firmware_version);
+    esp_err_t voltage_ret = yoke_zxacc_maker_get_battery_voltage(&s_zxacc_maker,
+                                                                   &voltage_mv);
     yoke_zxacc_maker_get_charge_state(&s_zxacc_maker, &charge_state);
 
-    lv_label_set_text_fmt(s_zxacc_voltage_label, "%.3fV", voltage_mv / 1000.0f);
+    if (version_ret == ESP_OK) {
+        lv_label_set_text_fmt(s_zxacc_version_label, "Version: 0x%04X", firmware_version);
+    }
+    if (voltage_ret == ESP_OK) {
+        lv_label_set_text_fmt(s_zxacc_voltage_label, "%lu.%03lu V",
+                              (unsigned long)(voltage_mv / 1000U),
+                              (unsigned long)(voltage_mv % 1000U));
+    } else {
+        lv_label_set_text(s_zxacc_voltage_label, "--.-- V");
+    }
     const char *charge_str = "unknown";
     if (charge_state == YOKE_ZXACC_MAKER_CHARGE_CHARGING) charge_str = "charging";
     if (charge_state == YOKE_ZXACC_MAKER_CHARGE_NOT_CHARGING) charge_str = "not charging";
@@ -1362,14 +1351,8 @@ static void ui_refresh_zxacc(void)
     lv_obj_set_style_text_color(s_zxacc_charge_label,
                                 (charge_state == YOKE_ZXACC_MAKER_CHARGE_CHARGING)
                                     ? UI_COLOR_SUCCESS : UI_COLOR_SUBTEXT, 0);
-    lv_label_set_text(s_zxacc_charge_label, charge_str);
+    lv_label_set_text_fmt(s_zxacc_charge_label, "Charge: %s", charge_str);
 
-    uint16_t wake = 0, shutdown = 0;
-    if (yoke_zxacc_maker_get_wakeup_time(&s_zxacc_maker, &wake) == ESP_OK &&
-        yoke_zxacc_maker_get_shutdown_time(&s_zxacc_maker, &shutdown) == ESP_OK) {
-        lv_label_set_text_fmt(s_zxacc_timing_label, "Key: %u / %u ms",
-                              (unsigned)wake, (unsigned)shutdown);
-    }
 }
 
 static void ui_update_status_bar(void)
@@ -1396,8 +1379,8 @@ static void ui_update_status_bar(void)
     if (s_current_page == UI_PAGE_DASHBOARD && s_zxacc_maker.initialized) {
         uint32_t voltage_mv = 0;
         if (yoke_zxacc_maker_get_battery_voltage(&s_zxacc_maker, &voltage_mv) == ESP_OK) {
-            lv_label_set_text_fmt(s_status_label, "Port %s  |  Battery %.2fV", selected->name,
-                                  voltage_mv / 1000.0f);
+            // lv_label_set_text_fmt(s_status_label, "Port %s  |  Battery %.2fV", selected->name,
+            //                       voltage_mv / 1000.0f);
             return;
         }
     }
@@ -1824,8 +1807,6 @@ void app_main(void)
         ESP_LOGE(TAG, "Screen initialization failed; continuing without UI");
     }
 
-    print_help();
-
     char input;
     while(1){
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -1834,98 +1815,39 @@ void app_main(void)
                 continue;
             }
             ESP_LOGI(TAG, "input: %c", input);
-            if(input == 'r'){
-                ESP_LOGI(TAG, "set all to red");
-                rgbw_set_all(25, 0, 0, 0);
-            } else if(input == 'g'){
-                ESP_LOGI(TAG, "set all to green");
-                rgbw_set_all(0, 25, 0, 0);
+            if(input == 'a'){
+                //读取zxacc_maker各个状态
+                uint16_t version = 0;
+                yoke_zxacc_maker_get_firmware_version(&s_zxacc_maker, &version);
+                ESP_LOGI(TAG, "ZXACC Maker 版本: 0x%04X", version);
+                //读取电池电压
+                uint32_t voltage_mv = 0;
+                yoke_zxacc_maker_get_battery_voltage(&s_zxacc_maker, &voltage_mv);
+                ESP_LOGI(TAG, "ZXACC Maker 电压: %u mV", voltage_mv);
+                //读取充电状态
+                yoke_zxacc_maker_charge_state_t charge_state = 0;
+                yoke_zxacc_maker_get_charge_state(&s_zxacc_maker, &charge_state);
+                ESP_LOGI(TAG, "ZXACC Maker 充电状态: %d", charge_state);
+                //读取唤醒时间和关机时间
+                uint16_t wake_time = 0;
+                uint16_t shutdown_time = 0;
+                yoke_zxacc_maker_get_wakeup_time(&s_zxacc_maker, &wake_time);
+                yoke_zxacc_maker_get_shutdown_time(&s_zxacc_maker, &shutdown_time);
+                ESP_LOGI(TAG, "ZXACC Maker wakeup time: %u s, shutdown time: %u s", wake_time, shutdown_time);
+                
             } else if(input == 'b'){
-                ESP_LOGI(TAG, "set all to blue");
-                rgbw_set_all(0, 0, 25, 0);
-            } else if(input == 'w'){
-                ESP_LOGI(TAG, "set all to white");
-                rgbw_set_all(0, 0, 0, 25);
-            } else if(input == 'o'){
-                ESP_LOGI(TAG, "turn off all");
-                rgbw_set_all(0, 0, 0, 0);
-            } else if(input == 'h'){
-                print_help();
-            } else if(input == 'i'){
-                radar_init();
+                //关机
+                ESP_LOGW(TAG, "关机");
+                yoke_zxacc_maker_shutdown(&s_zxacc_maker);
+            } else if(input == 'c'){
+                //设置关机10秒
+                yoke_zxacc_maker_set_timer_wakeup(&s_zxacc_maker, 10);
             } else if(input == 'd'){
-                radar_read();
+                
             } else if(input == 'e'){
-                radar_set_enabled(true);
-            } else if(input == 'x'){
-                radar_set_enabled(false);
-            } else if(input == 'u'){
-                radar_deinit();
-            } else if(input == 'I'){
-                ec11_init();
-            } else if(input == 'K'){
-                ec11_read_key();
-            } else if(input == 'C'){
-                ec11_read_encoder(false);
-            } else if(input == 'D'){
-                ec11_read_encoder(true);
-            } else if(input == 'R'){
-                ec11_set_color(25, 0, 0);
-            } else if(input == 'G'){
-                ec11_set_color(0, 25, 0);
-            } else if(input == 'B'){
-                ec11_set_color(0, 0, 25);
-            } else if(input == 'W'){
-                ec11_set_color(25, 25, 25);
-            } else if(input == 'O'){
-                ec11_set_color(0, 0, 0);
-            } else if(input == 'U'){
-                ec11_deinit();
-            } else if(input == 'm'){
-                qmsd_debug_heap_print(MALLOC_CAP_INTERNAL, 0);
-                qmsd_debug_heap_print(MALLOC_CAP_SPIRAM, 0);
             } else if(input == 'f'){
-                motor_drive(true);
-            } else if(input == 'v'){
-                motor_drive(false);
-            } else if(input == 's'){
-                motor_stop(false);
-            } else if(input == 'q'){
-                motor_stop(true);
-            } else if(input == '1'){
-                motor_set_speed(25);
-            } else if(input == '2'){
-                motor_set_speed(50);
-            } else if(input == '3'){
-                motor_set_speed(75);
-            } else if(input == '4'){
-                motor_set_speed(100);
-            } else if(input == 'z'){
-                motor_deinit();
-            } else if(input == 'p'){
-                zxacc_maker_init();
-            } else if(input == 'A'){
-                zxacc_maker_scan();
-            } else if(input == 'J'){
-                zxacc_maker_print_status();
-            } else if(input == 'N'){
-                zxacc_maker_print_timings();
-            } else if(input == 'T'){
-                zxacc_maker_set_default_timings();
-            } else if(input == 't'){
-                zxacc_maker_set_timer_wakeup_interactive();
-            } else if(input == 'L'){
-                rgbw_init();
-            } else if(input == 'l'){
-                rgbw_deinit();
-            } else if(input == 'k'){
-                keyw_init();
-            } else if(input == 'j'){
-                keyw_deinit();
-            } else if(input == 'M'){
-                motor_init();
-            } else {
-                ESP_LOGW(TAG, "unknown command: %c", input);
+            } else if(input == 'g'){
+            } else if(input == 'h'){
             }
         }
     }
