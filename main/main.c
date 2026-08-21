@@ -1257,10 +1257,10 @@ static void zxacc_click(lv_event_t *event)
         return;
     }
 
-    if (action == 1 && s_zxacc_shutdown_seconds > 10) {
-        s_zxacc_shutdown_seconds -= 10;
+    if (action == 1 && s_zxacc_shutdown_seconds > 0) {
+        s_zxacc_shutdown_seconds -= 1;
     } else if (action == 2 && s_zxacc_shutdown_seconds < 3600) {
-        s_zxacc_shutdown_seconds += 10;
+        s_zxacc_shutdown_seconds += 1;
     }
     lv_label_set_text_fmt(s_zxacc_shutdown_label, "%lu s",
                           (unsigned long)s_zxacc_shutdown_seconds);
@@ -1298,7 +1298,8 @@ static void ui_page_zxacc_create(lv_obj_t *parent)
 
     lv_obj_t *decrease_btn = ui_make_button(parent, "-", UI_COLOR_CARD, 46, 30);
     lv_obj_set_pos(decrease_btn, 18, 176);
-    lv_obj_add_event_cb(decrease_btn, zxacc_click, LV_EVENT_CLICKED, (void *)1);
+    lv_obj_add_event_cb(decrease_btn, zxacc_click, LV_EVENT_SHORT_CLICKED, (void *)1);
+    lv_obj_add_event_cb(decrease_btn, zxacc_click, LV_EVENT_LONG_PRESSED_REPEAT, (void *)1);
 
     s_zxacc_shutdown_label = lv_label_create(parent);
     lv_label_set_text(s_zxacc_shutdown_label, "0 s");
@@ -1309,7 +1310,8 @@ static void ui_page_zxacc_create(lv_obj_t *parent)
 
     lv_obj_t *increase_btn = ui_make_button(parent, "+", UI_COLOR_CARD, 46, 30);
     lv_obj_set_pos(increase_btn, 176, 176);
-    lv_obj_add_event_cb(increase_btn, zxacc_click, LV_EVENT_CLICKED, (void *)2);
+    lv_obj_add_event_cb(increase_btn, zxacc_click, LV_EVENT_SHORT_CLICKED, (void *)2);
+    lv_obj_add_event_cb(increase_btn, zxacc_click, LV_EVENT_LONG_PRESSED_REPEAT, (void *)2);
 
     lv_obj_t *set_btn = ui_make_button(parent, "Set timer", UI_COLOR_ACCENT, 150, 30);
     lv_obj_set_pos(set_btn, 45, 212);

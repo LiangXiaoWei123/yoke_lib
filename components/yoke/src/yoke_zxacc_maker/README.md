@@ -33,15 +33,4 @@ ZXACC-maker 是带 PY32F002B 从机的电源管理底板。ESP32-S3 通过 I2C �
 
 `0x07` 与 `0x0C` 会改变供电状态，调试时请确认串口和程序下载工具不会因此断开。
 
-## ESP-IDF 示例
-
-```c
-yoke_zxacc_maker_t board = {0};
-yoke_zxacc_maker_config_t config = yoke_zxacc_maker_default_config();
-ESP_ERROR_CHECK(yoke_zxacc_maker_init(&board, &config));
-
-yoke_zxacc_maker_status_t status;
-ESP_ERROR_CHECK(yoke_zxacc_maker_get_status(&board, &status));
-printf("battery: %lu mV\n", (unsigned long)status.battery_voltage_mv);
-```
 

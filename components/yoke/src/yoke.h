@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ryzobee_yoke.h"
 #include "yoke_ec11/yoke_ec11.h"
 #include "yoke_keyw/yoke_keyw.h"
 #include "yoke_moto/yoke_moto.h"
