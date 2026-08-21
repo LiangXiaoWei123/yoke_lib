@@ -1,16 +1,23 @@
-version: 1.0.0
+version: "1.0.0"
 description: Yoke hardware drivers for RootMaker boards
-url: https://github.com/ryzobee/yoke
+url: "https://github.com/LiangXiaoWei123/yoke_lib"
+repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
+repository_info:
+  path: "components/yoke"
+license: "MIT"
+maintainers:
+  - "LiangXiaoWei123"
+issues: "https://github.com/LiangXiaoWei123/yoke_lib/issues"
 dependencies:
   idf:
-    version: '>=5.3'
+    version: ">=5.3"
   espressif/button:
-    version: '^4.2.0'
+    version: "^4.2.0"
+    require: public
   espressif/bdc_motor:
-    version: '^0.2.1'
+    version: "^0.2.1"
   espressif/esp_lvgl_port:
-    version: '^2.7.0'
-    public: true
+    version: "^2.7.0"
   lvgl/lvgl:
-    version: '^9.4.0'
-    public: true
+    version: "^9.4.0"
+    require: public

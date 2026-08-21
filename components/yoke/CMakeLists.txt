@@ -6,5 +6,8 @@ idf_component_register(
          "src/yoke_zxacc_maker/yoke_zxacc_maker.c"
          "src/yoke_screen/lcd_panel_st7789_spec.c"
     INCLUDE_DIRS "src" "src/yoke_ec11" "src/yoke_keyw" "src/yoke_moto" "src/yoke_rgbw" "src/yoke_rad60" "src/yoke_screen"
-    REQUIRES espressif__button espressif__bdc_motor esp_driver_i2c esp_driver_rmt esp_driver_spi esp_driver_uart esp_lcd esp_lvgl_port lvgl__lvgl freertos driver
+    # Headers exposed by this component require these components in consumers.
+    REQUIRES espressif__button esp_driver_i2c esp_driver_uart esp_lcd lvgl__lvgl freertos driver
+    # These dependencies are implementation details of the Yoke drivers.
+    PRIV_REQUIRES espressif__bdc_motor esp_driver_rmt esp_driver_spi esp_lvgl_port
 )

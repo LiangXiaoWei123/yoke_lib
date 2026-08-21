@@ -2,6 +2,19 @@
 
 ESP-IDF hardware drivers for RootMaker Yoke boards.
 
+## Installation
+
+Add the component to your project's `idf_component.yml`:
+
+```yaml
+dependencies:
+  LiangXiaoWei123/yoke:
+    version: "^1.0.0"
+```
+
+Then run `idf.py reconfigure` (or `idf.py build`) to download it from the ESP
+Component Registry.
+
 The component provides drivers for EC11 input, buttons, brushed DC motors,
 RAD60 radar, RGBW LEDs, the display/touchscreen, and the ZXACC-maker PY32
 power-management baseboard. Include the umbrella header when using multiple
