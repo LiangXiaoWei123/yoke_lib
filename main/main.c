@@ -62,7 +62,10 @@ static bool s_radar_initialized;
 static bool s_ec11_initialized;
 static bool s_rgbw_initialized;
 static i2c_master_bus_handle_t s_ec11_i2c_bus;
+static ui_if_port_t s_ec11_bus_port = UI_IF_PORT_P1;
 static yoke_ec11_t s_ec11;
+static bool s_ec11_key_prev;
+static int s_ec11_rot_acc;
 static yoke_moto_t s_motor;
 static yoke_keyw_t s_keyw;
 static yoke_zxacc_maker_t s_zxacc_maker;
@@ -110,8 +113,15 @@ static ui_if_port_t s_global_port = UI_IF_PORT_P1;
 static lv_obj_t *s_dash_dots[UI_PAGE_MAX - 1];
 static lv_obj_t *s_dash_state_labels[UI_PAGE_MAX - 1];
 
+/* Dashboard horizontal card wheel */
+static lv_obj_t *s_wheel_cont;
+static lv_obj_t *s_wheel_cards[UI_PAGE_MAX - 1];
+static lv_obj_t *s_wheel_page_label;
+static int s_wheel_index = 0;
+
 /* EC11 page widgets */
 static lv_obj_t *s_ec11_count_label;
+static lv_obj_t *s_ec11_diff_label;
 static lv_obj_t *s_ec11_key_label;
 
 /* Radar page widgets */
@@ -673,10 +683,42 @@ static const ui_dash_item_t s_dash_items[] = {
     { "Key",     "KEY" },
 };
 
-static void ui_card_click(lv_event_t *event)
+#define WHEEL_CARD_COUNT (UI_PAGE_MAX - 1)
+#define WHEEL_CARD_W      120
+#define WHEEL_CARD_STEP   126
+
+static void wheel_apply_styles(int idx)
 {
-    ui_page_t page = (ui_page_t)(intptr_t)lv_event_get_user_data(event);
-    ui_show_page(page);
+    for (int i = 0; i < WHEEL_CARD_COUNT; ++i) {
+        lv_obj_set_style_border_width(s_wheel_cards[i], i == idx ? 2 : 0, 0);
+        lv_obj_set_style_opa(s_wheel_cards[i], i == idx ? LV_OPA_COVER : LV_OPA_60, 0);
+    }
+}
+
+static void wheel_scroll_event(lv_event_t *event)
+{
+    lv_obj_t *wheel = lv_event_get_target(event);
+    int32_t sx = lv_obj_get_scroll_x(wheel);
+    int idx = (sx + WHEEL_CARD_STEP / 2) / WHEEL_CARD_STEP;
+    if (idx < 0) idx = 0;
+    if (idx >= WHEEL_CARD_COUNT) idx = WHEEL_CARD_COUNT - 1;
+
+    if (lv_event_get_code(event) == LV_EVENT_SCROLL_END) {
+        s_wheel_index = idx;
+        lv_label_set_text_fmt(s_wheel_page_label, "%d / %d", idx + 1,
+                              WHEEL_CARD_COUNT);
+    }
+    wheel_apply_styles(idx);
+}
+
+static void wheel_card_click(lv_event_t *event)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(event);
+    if (i == s_wheel_index) {
+        ui_show_page((ui_page_t)(i + 1));
+    } else {
+        lv_obj_scroll_to_x(s_wheel_cont, i * WHEEL_CARD_STEP, LV_ANIM_ON);
+    }
 }
 
 static void ui_page_dashboard_create(lv_obj_t *parent)
@@ -719,42 +761,60 @@ static void ui_page_dashboard_create(lv_obj_t *parent)
     }
     ui_refresh_port_selector();
 
-    for (int i = 0; i < 6; ++i) {
-        int row = i / 2;
-        int col = i % 2;
+    s_wheel_cont = lv_obj_create(parent);
+    lv_obj_set_size(s_wheel_cont, 240, 80);
+    lv_obj_set_pos(s_wheel_cont, 0, 124);
+    lv_obj_set_style_bg_opa(s_wheel_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_wheel_cont, 0, 0);
+    lv_obj_set_style_pad_all(s_wheel_cont, 0, 0);
+    lv_obj_set_style_pad_left(s_wheel_cont, 60, 0);
+    lv_obj_set_style_pad_right(s_wheel_cont, 60, 0);
+    lv_obj_set_scrollbar_mode(s_wheel_cont, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(s_wheel_cont, LV_DIR_HOR);
+    lv_obj_set_scroll_snap_x(s_wheel_cont, LV_SCROLL_SNAP_CENTER);
+    lv_obj_add_event_cb(s_wheel_cont, wheel_scroll_event, LV_EVENT_SCROLL, NULL);
+    lv_obj_add_event_cb(s_wheel_cont, wheel_scroll_event, LV_EVENT_SCROLL_END, NULL);
 
-        lv_obj_t *card = lv_obj_create(parent);
-        lv_obj_set_size(card, 104, 38);
-        lv_obj_set_pos(card, 12 + col * 112, 106 + row * 39);
+    for (int i = 0; i < WHEEL_CARD_COUNT; ++i) {
+        lv_obj_t *card = lv_obj_create(s_wheel_cont);
+        lv_obj_set_size(card, WHEEL_CARD_W, 52);
+        lv_obj_set_pos(card, i * WHEEL_CARD_STEP, 14);
         lv_obj_set_style_bg_color(card, UI_COLOR_SURFACE, 0);
         lv_obj_set_style_bg_color(card, UI_COLOR_CARD_ON, LV_STATE_PRESSED);
         lv_obj_set_style_radius(card, 10, 0);
-        lv_obj_set_style_border_width(card, 0, 0);
+        lv_obj_set_style_border_color(card, UI_COLOR_ACCENT, 0);
         lv_obj_set_style_pad_all(card, 0, 0);
 
         lv_obj_t *icon = lv_label_create(card);
         lv_label_set_text(icon, s_dash_items[i].icon);
         lv_obj_set_style_text_color(icon, UI_COLOR_ACCENT, 0);
         lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(icon, 8, 5);
+        lv_obj_set_pos(icon, 10, 6);
 
         lv_obj_t *name = lv_label_create(card);
         lv_label_set_text(name, s_dash_items[i].name);
         lv_obj_set_style_text_color(name, UI_COLOR_TEXT, 0);
         lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(name, 8, 21);
+        lv_obj_set_pos(name, 10, 28);
 
-        s_dash_dots[i] = ui_make_dot(card, 88, 7, UI_COLOR_CARD);
+        s_dash_dots[i] = ui_make_dot(card, 100, 8, UI_COLOR_CARD);
         s_dash_state_labels[i] = lv_label_create(card);
         lv_label_set_text(s_dash_state_labels[i], "");
         lv_obj_set_style_text_color(s_dash_state_labels[i], UI_COLOR_SUBTEXT, 0);
         lv_obj_set_style_text_font(s_dash_state_labels[i], &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(s_dash_state_labels[i], 40, 5);
+        lv_obj_set_pos(s_dash_state_labels[i], 56, 6);
 
-        lv_obj_add_event_cb(card, ui_card_click, LV_EVENT_CLICKED,
-                            (void *)(intptr_t)(i + 1));
+        s_wheel_cards[i] = card;
+        lv_obj_add_event_cb(card, wheel_card_click, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)i);
     }
+    wheel_apply_styles(0);
+
+    s_wheel_page_label = lv_label_create(parent);
+    lv_label_set_text(s_wheel_page_label, "1 / 6");
+    lv_obj_set_style_text_color(s_wheel_page_label, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_style_text_font(s_wheel_page_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_wheel_page_label, LV_ALIGN_TOP_MID, 0, 204);
 }
 
 static void ui_update_dash_dots(void)
@@ -815,13 +875,24 @@ static void ui_page_ec11_create(lv_obj_t *parent)
     lv_obj_t *count_cap = lv_label_create(parent);
     lv_label_set_text(count_cap, "COUNT");
     lv_obj_set_style_text_color(count_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_align(count_cap, LV_ALIGN_TOP_MID, 0, 48);
+    lv_obj_set_pos(count_cap, 20, 48);
 
     s_ec11_count_label = lv_label_create(parent);
     lv_label_set_text(s_ec11_count_label, "--");
     lv_obj_set_style_text_color(s_ec11_count_label, UI_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_ec11_count_label, &lv_font_montserrat_24, 0);
-    lv_obj_align(s_ec11_count_label, LV_ALIGN_TOP_MID, 0, 66);
+    lv_obj_set_pos(s_ec11_count_label, 20, 64);
+
+    lv_obj_t *diff_cap = lv_label_create(parent);
+    lv_label_set_text(diff_cap, "DIFF");
+    lv_obj_set_style_text_color(diff_cap, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_pos(diff_cap, 140, 48);
+
+    s_ec11_diff_label = lv_label_create(parent);
+    lv_label_set_text(s_ec11_diff_label, "--");
+    lv_obj_set_style_text_color(s_ec11_diff_label, UI_COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(s_ec11_diff_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_pos(s_ec11_diff_label, 140, 66);
 
     s_ec11_key_label = lv_label_create(parent);
     lv_label_set_text(s_ec11_key_label, "Key: --");
@@ -854,6 +925,7 @@ static void ui_refresh_ec11(void)
 {
     if (!s_ec11_initialized) {
         lv_label_set_text(s_ec11_count_label, "--");
+        lv_label_set_text(s_ec11_diff_label, "--");
         lv_label_set_text(s_ec11_key_label, "Key: not ready");
         return;
     }
@@ -863,11 +935,52 @@ static void ui_refresh_ec11(void)
         lv_label_set_text_fmt(s_ec11_count_label, "%d", (int)count);
     }
 
+    int16_t diff = 0;
+    if (yoke_ec11_read_encoder_diff(&s_ec11, &diff) == ESP_OK) {
+        lv_label_set_text_fmt(s_ec11_diff_label, "%+d", (int)diff);
+        if (diff != 0) {
+            ESP_LOGI(TAG, "EC11 diff: %+d", (int)diff);
+        }
+    }
+
     yoke_ec11_key_t key;
     if (yoke_ec11_read_key(&s_ec11, &key) == ESP_OK) {
         lv_label_set_text_fmt(s_ec11_key_label, "Key: %s | %u",
                               key.pressed ? "pressed" : "released",
                               (unsigned)key.press_count);
+    }
+}
+
+/* EC11 联动：初始化后旋转编码器控制仪表盘轮盘，按键进入/返回 */
+static void ec11_ui_control(void)
+{
+    if (!s_ec11_initialized) return;
+
+    yoke_ec11_key_t key;
+    if (yoke_ec11_read_key(&s_ec11, &key) == ESP_OK) {
+        if (key.pressed && !s_ec11_key_prev) {
+            if (s_current_page == UI_PAGE_DASHBOARD) {
+                ui_show_page((ui_page_t)(s_wheel_index + 1));
+            } else {
+                ui_show_page(UI_PAGE_DASHBOARD);
+            }
+        }
+        s_ec11_key_prev = key.pressed;
+    }
+
+    int16_t diff = 0;
+    if (yoke_ec11_read_encoder_diff(&s_ec11, &diff) == ESP_OK &&
+        s_current_page == UI_PAGE_DASHBOARD) {
+        /* 外设每个机械棘爪返回 2，累加后每满 2 移动一格，避免咔哒一次跳 2 */
+        s_ec11_rot_acc += diff;
+        int steps = s_ec11_rot_acc / 2;
+        if (steps != 0) {
+            s_ec11_rot_acc -= steps * 2;
+            s_wheel_index += steps;
+            if (s_wheel_index < 0) s_wheel_index = 0;
+            if (s_wheel_index >= WHEEL_CARD_COUNT) s_wheel_index = WHEEL_CARD_COUNT - 1;
+            lv_obj_scroll_to_x(s_wheel_cont, s_wheel_index * WHEEL_CARD_STEP, LV_ANIM_ON);
+        }
     }
 }
 
@@ -1196,42 +1309,42 @@ static void ui_page_motor_create(lv_obj_t *parent)
     lv_label_set_text(s_motor_state_label, "not initialized");
     lv_obj_set_style_text_color(s_motor_state_label, UI_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_motor_state_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(s_motor_state_label, LV_ALIGN_TOP_MID, 0, 84);
+    lv_obj_align(s_motor_state_label, LV_ALIGN_TOP_MID, 0, 80);
 
     lv_obj_t *dir_cap = lv_label_create(parent);
     lv_label_set_text(dir_cap, "DIRECTION");
     lv_obj_set_style_text_color(dir_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(dir_cap, 18, 112);
+    lv_obj_set_pos(dir_cap, 18, 104);
 
     lv_obj_t *fwd_btn = ui_make_button(parent, "Forward", UI_COLOR_ACCENT, 95, 30);
-    lv_obj_set_pos(fwd_btn, 18, 130);
+    lv_obj_set_pos(fwd_btn, 18, 122);
     lv_obj_add_event_cb(fwd_btn, motor_click, LV_EVENT_CLICKED, (void *)2);
 
     lv_obj_t *rev_btn = ui_make_button(parent, "Reverse", UI_COLOR_CARD, 95, 30);
-    lv_obj_set_pos(rev_btn, 125, 130);
+    lv_obj_set_pos(rev_btn, 125, 122);
     lv_obj_add_event_cb(rev_btn, motor_click, LV_EVENT_CLICKED, (void *)3);
 
     lv_obj_t *stop_cap = lv_label_create(parent);
     lv_label_set_text(stop_cap, "STOP");
     lv_obj_set_style_text_color(stop_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(stop_cap, 18, 166);
+    lv_obj_set_pos(stop_cap, 18, 154);
 
     lv_obj_t *coast_btn = ui_make_button(parent, "Coast", UI_COLOR_CARD, 95, 28);
-    lv_obj_set_pos(coast_btn, 18, 184);
+    lv_obj_set_pos(coast_btn, 18, 172);
     lv_obj_add_event_cb(coast_btn, motor_click, LV_EVENT_CLICKED, (void *)4);
 
     lv_obj_t *brake_btn = ui_make_button(parent, "Brake", UI_COLOR_DANGER, 95, 28);
-    lv_obj_set_pos(brake_btn, 125, 184);
+    lv_obj_set_pos(brake_btn, 125, 172);
     lv_obj_add_event_cb(brake_btn, motor_click, LV_EVENT_CLICKED, (void *)5);
 
     lv_obj_t *speed_cap = lv_label_create(parent);
     lv_label_set_text(speed_cap, "SPEED");
     lv_obj_set_style_text_color(speed_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(speed_cap, 18, 214);
+    lv_obj_set_pos(speed_cap, 18, 202);
 
     s_motor_speed_slider = lv_slider_create(parent);
     lv_obj_set_size(s_motor_speed_slider, 180, 18);
-    lv_obj_set_pos(s_motor_speed_slider, 16, 232);
+    lv_obj_set_pos(s_motor_speed_slider, 16, 220);
     lv_slider_set_range(s_motor_speed_slider, 0, 100);
     lv_slider_set_value(s_motor_speed_slider, s_motor_speed_pct, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_motor_speed_slider, UI_COLOR_CARD, LV_PART_MAIN);
@@ -1381,8 +1494,8 @@ static void ui_update_status_bar(void)
     if (s_current_page == UI_PAGE_DASHBOARD && s_zxacc_maker.initialized) {
         uint32_t voltage_mv = 0;
         if (yoke_zxacc_maker_get_battery_voltage(&s_zxacc_maker, &voltage_mv) == ESP_OK) {
-            // lv_label_set_text_fmt(s_status_label, "Port %s  |  Battery %.2fV", selected->name,
-            //                       voltage_mv / 1000.0f);
+            lv_label_set_text_fmt(s_status_label, "Port %s  |  Battery %.2fV", selected->name,
+                                  voltage_mv / 1000.0f);
             return;
         }
     }
@@ -1465,10 +1578,19 @@ static void ui_page_keyw_create(lv_obj_t *parent)
 
 /* -------------------- Timers & entry -------------------- */
 
+static void ui_timer_100ms(lv_timer_t *timer)
+{
+    (void)timer;
+    if (s_current_page == UI_PAGE_EC11) {
+        /* 先刷新显示（消费 diff 用于展示），再跑联动控制，保证按键可退出 */
+        ui_refresh_ec11();
+    }
+    ec11_ui_control();
+}
+
 static void ui_timer_200ms(lv_timer_t *timer)
 {
     (void)timer;
-    if (s_current_page == UI_PAGE_EC11) ui_refresh_ec11();
     if (s_current_page == UI_PAGE_RGBW) ui_refresh_rgbw();
     if (s_current_page == UI_PAGE_MOTOR) ui_refresh_motor();
     if (s_current_page == UI_PAGE_KEYW) ui_refresh_keyw();
@@ -1511,6 +1633,7 @@ static void screen_create_ui(void)
 
     ui_show_page(UI_PAGE_DASHBOARD);
 
+    lv_timer_create(ui_timer_100ms, 100, NULL);
     lv_timer_create(ui_timer_200ms, 200, NULL);
     lv_timer_create(ui_timer_500ms, 500, NULL);
 
@@ -1628,7 +1751,16 @@ static void ec11_init(void)
         return;
     }
 
-    if (s_ec11_i2c_bus == NULL) {
+    if (s_ec11_i2c_bus == NULL || s_ec11_bus_port != s_global_port) {
+        if (s_ec11_i2c_bus != NULL) {
+            /* 端口已切换：旧总线仍绑定在原端口引脚上，先删除再重建 */
+            esp_err_t del_ret = i2c_del_master_bus(s_ec11_i2c_bus);
+            s_ec11_i2c_bus = NULL;
+            if (del_ret != ESP_OK) {
+                ESP_LOGE(TAG, "EC11 I2C bus delete failed: %s", esp_err_to_name(del_ret));
+                return;
+            }
+        }
         const i2c_master_bus_config_t bus_config = {
             .i2c_port = EC11_I2C_PORT,
             .sda_io_num = port->pin_a,
@@ -1642,6 +1774,7 @@ static void ec11_init(void)
             ESP_LOGE(TAG, "EC11 I2C bus init failed: %s", esp_err_to_name(ret));
             return;
         }
+        s_ec11_bus_port = s_global_port;
     }
 
     yoke_ec11_config_t config = yoke_ec11_default_config();
