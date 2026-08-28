@@ -1,0 +1,35 @@
+name: Upload Yoke Components
+
+# Push any semver-style tag (e.g. `v1.0.0`) to publish all seven components to
+# the ESP Component Registry. Each component's version is read from its own
+# `idf_component.yml`; versions that already exist in the registry are skipped,
+# so a single tag can release only the components whose manifest version was
+# bumped.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload components to ESP Component Registry
+        uses: espressif/upload-components-ci-action@v2
+        with:
+          namespace: "LiangXiaoWei123"
+          components: |
+            rootmaker_utils: components/rootmaker_utils
+            yoke_ec11: components/yoke_ec11
+            yoke_keyw: components/yoke_keyw
+            yoke_motor: components/yoke_motor
+            yoke_rgbw: components/yoke_rgbw
+            yoke_rad60: components/yoke_rad60
+            yoke_screen: components/yoke_screen
+            yoke_zxacc_maker: components/yoke_zxacc_maker

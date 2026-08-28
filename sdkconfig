@@ -2297,7 +2297,18 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
-# yoke_bsp
+# yoke_rad60
+#
+
+#
+# RAD60 radar
+#
+# CONFIG_YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM is not set
+# end of RAD60 radar
+# end of yoke_rad60
+
+#
+# yoke_screen
 #
 
 #
@@ -2306,13 +2317,7 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 CONFIG_YOKE_BSP_SCREEN_LVGL_DRAW_BUFFER_IN_PSRAM=y
 # CONFIG_YOKE_BSP_SCREEN_LVGL_TASK_STACK_IN_PSRAM is not set
 # end of Screen
-
-#
-# RAD60 radar
-#
-# CONFIG_YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM is not set
-# end of RAD60 radar
-# end of yoke_bsp
+# end of yoke_screen
 
 #
 # IoT Button
@@ -2382,7 +2387,7 @@ CONFIG_LV_MEM_ADR=0x0
 #
 # HAL Settings
 #
-CONFIG_LV_DEF_REFR_PERIOD=33
+CONFIG_LV_DEF_REFR_PERIOD=16
 CONFIG_LV_DPI_DEF=130
 # end of HAL Settings
 

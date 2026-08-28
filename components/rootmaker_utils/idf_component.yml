@@ -1,0 +1,13 @@
+version: "1.0.0"
+description: RootMaker interface port model and I2C bus pool for ESP-IDF
+url: "https://github.com/LiangXiaoWei123/yoke_lib"
+repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
+repository_info:
+  path: "components/rootmaker_utils"
+license: "MIT"
+maintainers:
+  - "LiangXiaoWei123"
+issues: "https://github.com/LiangXiaoWei123/yoke_lib/issues"
+dependencies:
+  idf:
+    version: ">=5.3"

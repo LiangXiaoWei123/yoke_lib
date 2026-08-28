@@ -1,0 +1,20 @@
+version: "1.0.0"
+description: Yoke-Screen ST7789 display and CST816T touch driver with LVGL for RootMaker boards
+url: "https://github.com/LiangXiaoWei123/yoke_lib"
+repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
+repository_info:
+  path: "components/yoke_screen"
+license: "MIT"
+maintainers:
+  - "LiangXiaoWei123"
+issues: "https://github.com/LiangXiaoWei123/yoke_lib/issues"
+dependencies:
+  idf:
+    version: ">=5.3"
+  espressif/esp_lvgl_port:
+    version: "^2.7.0"
+  lvgl/lvgl:
+    version: "^9.4.0"
+    require: public
+  LiangXiaoWei123/rootmaker_utils:
+    version: "^1.0.0"

@@ -1,0 +1,16 @@
+menu "yoke_rad60"
+
+menu "RAD60 radar"
+
+config YOKE_BSP_RAD60_TASK_STACKS_IN_PSRAM
+    bool "Allocate RAD60 task stacks in PSRAM"
+    default n
+    depends on SPIRAM && FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    help
+        Store the RAD60 processing task and its UART receive/send task stacks
+        in PSRAM. This saves internal SRAM, but the tasks must not run code
+        that requires an internal-memory stack while cache is disabled.
+
+endmenu
+
+endmenu

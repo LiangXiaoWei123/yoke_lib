@@ -1,12 +1,37 @@
 # Rootmaker ESP-IDF 组件库
 
-当前工程用于联调 `components/` 下的 Yoke 组件。根目录 `main` 提供一个串口命令控制台，输入一行命令后立即执行。
+本仓库是 RootMaker 系列外设的 ESP-IDF 组件集合。每个外设独立封装为一个组件，
+组件内自带 `examples/` 示例工程，所有组件都可独立发布到
+[ESP 组件库](https://components.espressif.com/)。
 
-## 组件
+根目录的 `main` 是一个串口联调控制台，用于同时测试全部组件。
 
-- `yoke_ec11`：EC11 编码器、按键与板载两颗 WS2812。
-- `yoke_rad60`：RAD60 UART 雷达模块。
-- `yoke_rgbw`：外接 RGBW WS2812 灯带。
+## 组件列表
+
+| 组件 | 功能 | 发布名 |
+| --- | --- | --- |
+| `yoke_ec11` | EC11 编码器、按键与板载两颗 WS2812 | `LiangXiaoWei123/yoke_ec11` |
+| `yoke_keyw` | 按键 + GPIO 指示灯模块 | `LiangXiaoWei123/yoke_keyw` |
+| `yoke_motor` | 有刷直流电机（MCPWM） | `LiangXiaoWei123/yoke_motor` |
+| `yoke_rgbw` | 外接 RGBW WS2812 灯带 | `LiangXiaoWei123/yoke_rgbw` |
+| `yoke_rad60` | RAD60 UART 雷达模块 | `LiangXiaoWei123/yoke_rad60` |
+| `yoke_screen` | ST7789 屏幕 + CST816T 触摸 + LVGL | `LiangXiaoWei123/yoke_screen` |
+| `yoke_zxacc_maker` | ZXACC-maker PY32 电源管理底板 | `LiangXiaoWei123/yoke_zxacc_maker` |
+
+每个组件的目录结构：
+
+```text
+components/<name>/
+├── CMakeLists.txt        # 组件构建定义
+├── idf_component.yml     # 版本、依赖与仓库元信息（上传时读取）
+├── Kconfig               # 组件配置项（yoke_screen、yoke_rad60 等）
+├── README.md
+├── CHANGELOG.md
+├── LICENSE
+├── include/              # 公共头文件
+├── src/                  # 实现源码
+└── examples/             # 示例工程（随组件一起上传）
+```
 
 ## 引脚默认值
 
@@ -15,42 +40,33 @@
 | EC11 I2C | SDA=GPIO15，SCL=GPIO16 |
 | RGBW 灯带 | GPIO13，4 颗灯珠 |
 | RAD60 UART | UART1，TX=GPIO17，RX=GPIO18，921600 bit/s |
+| ZXACC-maker I2C | SDA=GPIO41，SCL=GPIO40，地址 `0x73` |
 
-雷达原驱动默认使用 GPIO15/16，这与 EC11 的 I2C 冲突。因此根工程控制台的雷达默认值改为 GPIO17/18；按实际硬件修改 `main/main.c` 顶部的 `APP_*` 宏，或在 `radar init` 命令中传入引脚。
+> 雷达原驱动默认使用 GPIO15/16，与 EC11 的 I2C 冲突，因此根工程控制台把雷达
+> 默认值改为 GPIO17/18。各组件示例中可通过宏或入参覆盖默认引脚。
 
-## 串口命令
+## 发布到 ESP 组件库
 
-烧录后在串口监视器输入 `help` 查看帮助。常用命令：
+`.github/workflows/upload-components.yml` 使用
+[`espressif/upload-components-ci-action`](https://github.com/espressif/upload-components-ci-action)
+一次性上传全部 7 个组件到 `LiangXiaoWei123` 命名空间：
 
-```text
-ec11 info
-ec11 key
-ec11 count
-ec11 led 0 255 0 0
+1. 需要发布的新版本，先修改对应组件 `idf_component.yml` 中的 `version`（SemVer）。
+2. 提交并推送，然后打一个 semver 格式的标签（如 `v1.0.0`）：
 
-rgbw init
-rgbw set 255 0 0 0
-rgbw off
+   ```sh
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
 
-radar init
-radar read
-radar enable 1
+3. GitHub Actions 触发上传。组件版本取自各自的 `idf_component.yml`，版本已存在于
+   组件库的组件会被自动跳过，因此一个标签可以只发布被改动的组件。
 
-# ZXACC-maker（先执行 p 初始化）
-p
-A
-J
-N
-T
-t
-```
+首次发布前，需要在 [components.espressif.com](https://components.espressif.com/)
+完成 namespace（`LiangXiaoWei123`）的注册与登录（GitHub OAuth），并保证 GitHub
+账号对该 namespace 有写权限。
 
-ZXACC-maker 调试命令：`p` 初始化并探测地址 `0x73`，`A` 扫描 I2C 总线，`J` 读取
-电池/充电状态，`N` 读取按键开关机时长，`T` 将两种按键时长写为 2000 ms。`t` 会提示输入
-定时唤醒秒数；输入数值并回车后，底板立即进入低功耗，直至定时唤醒。
-命令参数以空格分隔；`rgbw init [gpio led_num]` 和 `radar init [uart tx_gpio rx_gpio baudrate]` 可覆盖默认配置。
-
-## 构建与烧录
+## 构建与烧录（根联调工程）
 
 加载 ESP-IDF 环境后执行：
 
@@ -58,3 +74,10 @@ ZXACC-maker 调试命令：`p` 初始化并探测地址 `0x73`，`A` 扫描 I2C 
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
+
+各组件独立使用时可参考其 `examples/` 下的示例工程。
+
+## 硬件文档
+
+- [ZXRoot-Maker-V10 原理图](docs/ZXRoot-Maker-V10.pdf)
+- [ZXACC-Maker-V10 原理图](docs/ZXACC-Maker-V10.pdf)
