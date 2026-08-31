@@ -22,6 +22,7 @@ struct yoke_zxacc_maker {
     i2c_master_bus_handle_t i2c_bus;
     i2c_master_dev_handle_t i2c_device;
     rootmaker_port_t port;
+    bool bus_ref_held;
     bool initialized;
 };
 
@@ -73,6 +74,7 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(void) {
         free(board);
         return NULL;
     }
+    board->bus_ref_held = true;
 
     const i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -91,14 +93,21 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(void) {
 }
 
 esp_err_t yoke_zxacc_maker_deinit(yoke_zxacc_maker_handle_t board) {
-    if (!zxacc_is_ready(board))
+    if (board == NULL || (!board->initialized && !board->bus_ref_held))
         return ESP_ERR_INVALID_STATE;
-    esp_err_t ret = i2c_master_bus_rm_device(board->i2c_device);
-    if (ret != ESP_OK)
-        return ret;
-    ret = rootmaker_del_i2c_bus(&board->port);
-    if (ret != ESP_OK)
-        return ret;
+    if (board->i2c_device != NULL) {
+        esp_err_t ret = i2c_master_bus_rm_device(board->i2c_device);
+        if (ret != ESP_OK)
+            return ret;
+        board->i2c_device = NULL;
+        board->initialized = false;
+    }
+    if (board->bus_ref_held) {
+        esp_err_t ret = rootmaker_del_i2c_bus(&board->port);
+        if (ret != ESP_OK)
+            return ret;
+        board->bus_ref_held = false;
+    }
     free(board);
     return ESP_OK;
 }

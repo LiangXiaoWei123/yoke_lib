@@ -22,13 +22,9 @@
 #include "rootmaker_pin.h"
 #include "lcd_panel_st7789_spec.h"
 
-#if CONFIG_YOKE_BSP_SCREEN_LVGL_TASK_STACK_IN_PSRAM
-#define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-#else
 #define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-#endif
 
-#if CONFIG_YOKE_BSP_SCREEN_LVGL_DRAW_BUFFER_IN_PSRAM
+#if CONFIG_SPIRAM && SOC_PSRAM_DMA_CAPABLE
 #define YOKE_SCREEN_LVGL_DRAW_BUFFER_IN_EXTERNAL_MEMORY 1
 #else
 #define YOKE_SCREEN_LVGL_DRAW_BUFFER_IN_EXTERNAL_MEMORY 0
@@ -171,7 +167,7 @@ static esp_err_t app_lcd_init(void) {
 
     /* LCD backlight */
     gpio_config_t bk_gpio_config = { .mode = GPIO_MODE_OUTPUT, .pin_bit_mask = 1ULL << LCD_GPIO_BL };
-    ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
+    ESP_GOTO_ON_ERROR(gpio_config(&bk_gpio_config), err, TAG, "Backlight GPIO configuration failed");
 
     /* LCD initialization */
     ESP_LOGD(TAG, "Initialize SPI bus");
@@ -210,14 +206,14 @@ static esp_err_t app_lcd_init(void) {
     };
     ESP_GOTO_ON_ERROR(lcd_new_panel_st7789_spec(lcd_io, &panel_config, &lcd_panel), err, TAG, "New panel failed");
 
-    esp_lcd_panel_reset(lcd_panel);
-    esp_lcd_panel_init(lcd_panel);
-    esp_lcd_panel_set_gap(lcd_panel, 0, 320 - 240);
-    esp_lcd_panel_disp_on_off(lcd_panel, true);
-    esp_lcd_panel_swap_xy(lcd_panel, true);
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(lcd_panel), err, TAG, "Panel reset failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_init(lcd_panel), err, TAG, "Panel initialization failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_set_gap(lcd_panel, 0, 320 - 240), err, TAG, "Panel gap setup failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_disp_on_off(lcd_panel, true), err, TAG, "Panel enable failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_swap_xy(lcd_panel, true), err, TAG, "Panel rotation setup failed");
 
     /* LCD backlight on */
-    ESP_ERROR_CHECK(gpio_set_level(LCD_GPIO_BL, LCD_BL_ON_LEVEL));
+    ESP_GOTO_ON_ERROR(gpio_set_level(LCD_GPIO_BL, LCD_BL_ON_LEVEL), err, TAG, "Backlight enable failed");
 
     return ret;
 
@@ -229,6 +225,8 @@ err:
         esp_lcd_panel_io_del(lcd_io);
     }
     spi_bus_free(LCD_SPI_NUM);
+    lcd_panel = NULL;
+    lcd_io = NULL;
     return ret;
 }
 
@@ -322,8 +320,10 @@ lv_display_t* screen_with_lvgl_init(void) {
 }
 
 void screen_draw_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data) {
-    if (x + w > LCD_H_RES || y + h > LCD_V_RES) {
-        ESP_LOGE(TAG, "x + w or y + h must be less than 460, but x: %d, y: %d, w: %d, h: %d", x, y, w, h);
+    if (lcd_panel == NULL || data == NULL || w == 0 || h == 0 || x >= LCD_H_RES || y >= LCD_V_RES ||
+        w > LCD_H_RES - x || h > LCD_V_RES - y) {
+        ESP_LOGE(TAG, "Invalid bitmap: x=%u y=%u w=%u h=%u", x, y, w, h);
+        return;
     }
 
     esp_lcd_panel_draw_bitmap(lcd_panel, x, y, x + w, y + h, data);

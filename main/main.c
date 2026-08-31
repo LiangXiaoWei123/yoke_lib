@@ -7,7 +7,6 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
 #include "driver/i2c_master.h"
 #include "lvgl.h"
 #include "rootmaker_utils.h"

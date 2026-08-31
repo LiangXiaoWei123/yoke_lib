@@ -58,6 +58,8 @@ static esp_err_t keyw_create_button(yoke_keyw_handle_t keyw) {
         if (keyw->event_callbacks[event] != NULL) {
             ret = iot_button_register_cb(button, (button_event_t)event, NULL, yoke_keyw_button_callback, keyw);
             if (ret != ESP_OK) {
+                (void)iot_button_delete(button);
+                keyw->button_handle = NULL;
                 return ret;
             }
         }
@@ -109,15 +111,24 @@ esp_err_t yoke_keyw_set_long_press_time(yoke_keyw_handle_t keyw, uint16_t time_m
     if (keyw == NULL || time_ms == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    keyw->long_press_time_ms = time_ms;
     if (keyw->initialized) {
-        iot_button_delete((button_handle_t)keyw->button_handle);
+        const uint16_t old_time_ms = keyw->long_press_time_ms;
+        keyw->long_press_time_ms = time_ms;
+        (void)iot_button_delete((button_handle_t)keyw->button_handle);
         keyw->button_handle = NULL;
+        keyw->initialized = false;
         esp_err_t ret = keyw_create_button(keyw);
         if (ret != ESP_OK) {
+            keyw->long_press_time_ms = old_time_ms;
+            if (keyw_create_button(keyw) == ESP_OK) {
+                keyw->initialized = true;
+            }
             ESP_LOGE(TAG, "recreate button failed: %s", esp_err_to_name(ret));
             return ret;
         }
+        keyw->initialized = true;
+    } else {
+        keyw->long_press_time_ms = time_ms;
     }
     return ESP_OK;
 }
@@ -157,9 +168,14 @@ esp_err_t yoke_keyw_unregister_event_callback(yoke_keyw_handle_t keyw, button_ev
 }
 
 esp_err_t yoke_keyw_deinit(yoke_keyw_handle_t keyw) {
-    if (keyw == NULL || !keyw->initialized)
+    if (keyw == NULL)
         return ESP_ERR_INVALID_STATE;
-    esp_err_t ret = iot_button_delete((button_handle_t)keyw->button_handle);
+    keyw->initialized = false;
+    esp_err_t ret = ESP_OK;
+    if (keyw->button_handle != NULL) {
+        ret = iot_button_delete((button_handle_t)keyw->button_handle);
+    }
+    keyw->button_handle = NULL;
     (void)gpio_set_level(keyw->led_gpio_num, 0);
     free(keyw);
     return ret;

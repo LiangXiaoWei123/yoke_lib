@@ -10,18 +10,21 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 
+#include "rootmaker_utils.h"
 #include "yoke_rad60.h"
 
-#define RADAR_UART_NUM UART_NUM_1
-#define RADAR_TX_GPIO GPIO_NUM_17
-#define RADAR_RX_GPIO GPIO_NUM_18
-#define RADAR_BAUDRATE 921600
+static gpio_num_t radar_pins[] = { GPIO_NUM_17, GPIO_NUM_18 };
+static rootmaker_port_t radar_port = {
+    .type = ROOTMAKER_PORT_TYPE_RS_BUS,
+    .pin_num = 2,
+    .pins = radar_pins,
+};
 
 static const char *TAG = "rad60_demo";
 
 void app_main(void) {
-    ESP_ERROR_CHECK(yoke_rad60_init(RADAR_UART_NUM, RADAR_TX_GPIO, RADAR_RX_GPIO, RADAR_BAUDRATE));
-    ESP_LOGI(TAG, "RAD60 initialized on UART%d TX=%d RX=%d baud=%d", RADAR_UART_NUM, RADAR_TX_GPIO, RADAR_RX_GPIO, RADAR_BAUDRATE);
+    ESP_ERROR_CHECK(yoke_rad60_init(radar_port));
+    ESP_LOGI(TAG, "RAD60 initialized on TX=%d RX=%d", radar_pins[0], radar_pins[1]);
 
     while (1) {
         yoke_rad60_radar_data_t data;

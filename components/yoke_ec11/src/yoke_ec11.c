@@ -27,6 +27,8 @@ struct yoke_ec11 {
     uint8_t device_address;
     uint32_t scl_speed_hz;
     uint32_t timeout_ms;
+    bool bus_ref_held;
+    bool port_claimed;
     bool initialized;
 };
 
@@ -97,6 +99,7 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
         free(yoke);
         return NULL;
     }
+    yoke->port_claimed = true;
     ret = rootmaker_new_i2c_bus(&port, &yoke->bus_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "new i2c bus failed: %s", esp_err_to_name(ret));
@@ -104,6 +107,7 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
         free(yoke);
         return NULL;
     }
+    yoke->bus_ref_held = true;
     ret = yoke_add_device(yoke, YOKE_EC11_DEFAULT_I2C_ADDRESS);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "add device failed: %s", esp_err_to_name(ret));
@@ -125,19 +129,34 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
 }
 
 esp_err_t yoke_ec11_deinit(yoke_ec11_handle_t yoke) {
-    if (yoke == NULL || !yoke->initialized) {
+    if (yoke == NULL || (!yoke->initialized && !yoke->bus_ref_held && !yoke->port_claimed)) {
         return ESP_ERR_INVALID_STATE;
     }
-    esp_err_t ret = i2c_master_bus_rm_device(yoke->dev_handle);
-    if (ret != ESP_OK) {
-        return ret;
+    esp_err_t first_error = ESP_OK;
+    if (yoke->dev_handle != NULL) {
+        esp_err_t ret = i2c_master_bus_rm_device(yoke->dev_handle);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        yoke->dev_handle = NULL;
+        yoke->initialized = false;
     }
-    ret = rootmaker_del_i2c_bus(&yoke->port);
-    if (ret == ESP_OK) {
+    if (yoke->bus_ref_held) {
+        esp_err_t ret = rootmaker_del_i2c_bus(&yoke->port);
+        if (ret == ESP_OK) {
+            yoke->bus_ref_held = false;
+        } else {
+            first_error = ret;
+        }
+    }
+    if (yoke->port_claimed && !yoke->bus_ref_held) {
         (void)rootmaker_release_port(&yoke->port);
+        yoke->port_claimed = false;
+    }
+    if (!yoke->bus_ref_held && !yoke->port_claimed) {
         free(yoke);
     }
-    return ret;
+    return first_error;
 }
 
 esp_err_t yoke_ec11_probe(yoke_ec11_handle_t yoke) {

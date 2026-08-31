@@ -13,6 +13,7 @@ dependencies:
     version: ">=5.3"
   espressif/esp_lvgl_port:
     version: "^2.7.0"
+    require: public
   lvgl/lvgl:
     version: "^9.4.0"
     require: public

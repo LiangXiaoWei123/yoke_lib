@@ -17,27 +17,31 @@ Run `idf.py reconfigure` (or `idf.py build`) to download it.
 
 ```c
 #include "yoke_rad60.h"
+#include "rootmaker_utils.h"
 
-// Defaults: UART1, TX=GPIO15, RX=GPIO16, 921600 baud.
-ESP_ERROR_CHECK(yoke_rad60_init(UART_NUM_1, GPIO_NUM_15, GPIO_NUM_16, 921600));
+static gpio_num_t radar_pins[] = { GPIO_NUM_15, GPIO_NUM_16 };
+static rootmaker_port_t radar_port = {
+    .type = ROOTMAKER_PORT_TYPE_RS_BUS,
+    .pin_num = 2,
+    .pins = radar_pins,
+};
 
 yoke_rad60_radar_data_t data;
+ESP_ERROR_CHECK(yoke_rad60_init(radar_port));
 ESP_ERROR_CHECK(yoke_rad60_get_radar_data(&data));
 if (data.is_comm_ok && data.is_detected) {
     printf("objects: %u\n", data.radar_info.obj_num);
 }
 ```
 
-The module answers configuration commands too (sensitivity, sense time, light
-threshold, radar enable/disable, baud rate, ...). See
-[`include/yoke_rad60.h`](include/yoke_rad60.h) for the full command list.
+The component intentionally keeps a narrow surface area now: init, deinit, and
+non-blocking reads from the latest cached radar data.
 
 ## UART pin conflict note
 
 The RAD60 default pins (GPIO15/16) may conflict with other board peripherals;
-pass the actual TX/RX GPIOs to `yoke_rad60_init()` to override them. To change
-pins at runtime without restarting the driver, use
-`yoke_rad60_reconfigure_uart()`.
+pass the actual TX/RX GPIOs through the `rootmaker_port_t` you give to
+`yoke_rad60_init()`.
 
 ## Requirements
 
