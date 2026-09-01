@@ -8,6 +8,7 @@ typedef struct {
     i2c_master_bus_handle_t bus;
     gpio_num_t sda;
     gpio_num_t scl;
+    uint16_t ref_count;
     bool in_use;
 } rootmaker_i2c_bus_t;
 
@@ -25,7 +26,8 @@ typedef struct {
 static rootmaker_used_port_t s_used_ports[ROOTMAKER_MAX_USED_PORTS];
 
 static bool rootmaker_port_equal(rootmaker_port_t *a, const rootmaker_port_t *b) {
-    if (a->type != b->type || a->pin_num != b->pin_num) {
+    if (a == NULL || b == NULL || a->pins == NULL || b->pins == NULL ||
+        a->type != b->type || a->pin_num != b->pin_num) {
         return false;
     }
     for (uint8_t i = 0; i < a->pin_num; i++) {
@@ -83,7 +85,8 @@ esp_err_t rootmaker_get_port_pins(rootmaker_port_t *port, gpio_num_t *pin_a, gpi
     if (port == NULL || pin_a == NULL || pin_b == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (port->pin_num < 2 || port->pins[0] == GPIO_NUM_NC || port->pins[1] == GPIO_NUM_NC) {
+    if (port->pin_num < 2 || port->pins == NULL || port->pins[0] == GPIO_NUM_NC ||
+        port->pins[1] == GPIO_NUM_NC) {
         return ESP_ERR_INVALID_ARG;
     }
     *pin_a = port->pins[0];
@@ -92,7 +95,7 @@ esp_err_t rootmaker_get_port_pins(rootmaker_port_t *port, gpio_num_t *pin_a, gpi
 }
 
 esp_err_t rootmaker_get_port_pin(rootmaker_port_t *port, uint8_t index, gpio_num_t *pin) {
-    if (port == NULL || pin == NULL || index >= port->pin_num) {
+    if (port == NULL || pin == NULL || port->pins == NULL || index >= port->pin_num) {
         return ESP_ERR_INVALID_ARG;
     }
     if (port->pins[index] == GPIO_NUM_NC) {
@@ -150,6 +153,7 @@ esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t 
     if (port == NULL || out_bus == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    *out_bus = NULL;
 
     gpio_num_t sda;
     gpio_num_t scl;
@@ -175,11 +179,16 @@ esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t 
             }
             entry->sda = sda;
             entry->scl = scl;
+            entry->ref_count = 1;
             entry->in_use = true;
             *out_bus = entry->bus;
             return ESP_OK;
         }
         if (entry->sda == sda && entry->scl == scl) {
+            if (entry->ref_count == UINT16_MAX) {
+                return ESP_ERR_NO_MEM;
+            }
+            entry->ref_count++;
             *out_bus = entry->bus;
             return ESP_OK;
         }
@@ -202,6 +211,10 @@ esp_err_t rootmaker_del_i2c_bus(rootmaker_port_t *port) {
     for (int i2c_num = 0; i2c_num < I2C_NUM_MAX; i2c_num++) {
         rootmaker_i2c_bus_t *entry = &s_i2c_buses[i2c_num];
         if (entry->in_use && entry->sda == sda && entry->scl == scl) {
+            if (entry->ref_count > 1) {
+                entry->ref_count--;
+                return ESP_OK;
+            }
             ret = i2c_del_master_bus(entry->bus);
             if (ret != ESP_OK) {
                 return ret;

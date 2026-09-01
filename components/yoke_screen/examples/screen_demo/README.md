@@ -7,7 +7,8 @@ per second.
 ## Hardware
 
 Requires a RootMaker Yoke board (or one with the same pinout): the ST7789 is
-on SPI3 and the CST816T touch controller is on I2C1. Board pins are fixed by
+on SPI3 and the CST816T touch controller uses the board system I2C pins. The
+I2C peripheral is selected by `rootmaker_utils`; board pins are fixed by
 `board_pins.h` in the component and cannot be changed at runtime.
 
 ## Build and flash

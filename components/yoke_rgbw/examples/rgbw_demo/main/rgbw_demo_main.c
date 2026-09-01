@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "rootmaker_utils.h"
 
 #include "yoke_rgbw.h"
 
@@ -15,11 +16,13 @@
 static const char *TAG = "rgbw_demo";
 
 void app_main(void) {
-    const yoke_rgbw_config_t config = {
-        .gpio_num = RGBW_DATA_GPIO,
-        .led_num = RGBW_LED_NUM,
+    gpio_num_t rgbw_pins[] = { RGBW_DATA_GPIO };
+    const rootmaker_port_t rgbw_port = {
+        .type = ROOTMAKER_PORT_TYPE_RS_BUS,
+        .pin_num = 1,
+        .pins = rgbw_pins,
     };
-    ESP_ERROR_CHECK(yoke_rgbw_init(&config));
+    ESP_ERROR_CHECK(yoke_rgbw_init(rgbw_port, RGBW_LED_NUM));
 
     const struct {
         uint8_t red, green, blue, white;

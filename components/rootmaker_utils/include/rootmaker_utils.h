@@ -91,20 +91,26 @@ bool rootmaker_port_is_used(rootmaker_port_t *port);
  * The I2C peripheral is resolved automatically: the first free peripheral is
  * tried in order (I2C0 first, then I2C1). Sharing rules per peripheral:
  * - unused            -> the bus is created there.
- * - used with same pins -> the existing handle is returned (idempotent).
+ * - used with same pins -> the existing handle is returned and its reference
+ *   count is incremented.
  * - used with other pins -> the next peripheral is tried.
  * If no peripheral can host the port, ESP_ERR_INVALID_STATE is returned.
  *
  * @param port    Port descriptor holding the SDA/SCL pins.
  * @param out_bus Out: I2C master bus handle.
+ * @note Each successful call must be paired with one rootmaker_del_i2c_bus()
+ *       call. The underlying bus is deleted after the final release.
+ * @note Bus acquisition and release are not thread-safe. Call them serially
+ *       from the application lifecycle manager.
  * @return ESP_OK, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_STATE, or an error from i2c_new_master_bus().
  */
 esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t *out_bus);
 
 /**
- * Delete an I2C bus previously created by rootmaker_new_i2c_bus(). The bus is
- * located by matching the port's SDA/SCL pins, so the caller only passes the
- * same port used at creation time.
+ * Release one reference to an I2C bus previously acquired by
+ * rootmaker_new_i2c_bus(). The bus is deleted only when the final reference is
+ * released. The bus is located by matching the port's SDA/SCL pins, so the
+ * caller only passes the same port used at acquisition time.
  *
  * @param port  Port whose pins identify the bus.
  * @return ESP_OK, ESP_ERR_INVALID_ARG, ESP_ERR_NOT_FOUND, or an error from i2c_del_master_bus().

@@ -19,17 +19,20 @@ Run `idf.py reconfigure` (or `idf.py build`) to download it.
 ```c
 #include "yoke_motor.h"
 
-yoke_motor_handle_t motor;
-yoke_motor_config_t config = YOKE_MOTOR_DEFAULT_CONFIG();
-config.pwma_gpio_num = GPIO_NUM_19;
-config.pwmb_gpio_num = GPIO_NUM_20;
-ESP_ERROR_CHECK(yoke_motor_init(&motor, &config));
+gpio_num_t motor_pins[] = { GPIO_NUM_19, GPIO_NUM_20 };
+const rootmaker_port_t motor_port = {
+    .type = ROOTMAKER_PORT_TYPE_RS_BUS,
+    .pin_num = 2,
+    .pins = motor_pins,
+};
+yoke_motor_handle_t motor = yoke_motor_init(motor_port);
+ESP_ERROR_CHECK(motor != NULL ? ESP_OK : ESP_FAIL);
 
-yoke_motor_set_speed_percent(&motor, 60);
-yoke_motor_forward(&motor);       // spin forward at 60%
-yoke_motor_reverse(&motor);       // spin in reverse
-yoke_motor_brake(&motor);         // slow-decay stop
-yoke_motor_coast(&motor);         // fast-decay stop
+yoke_motor_set_speed_percent(motor, 60);
+yoke_motor_forward(motor);       // spin forward at 60%
+yoke_motor_reverse(motor);       // spin in reverse
+yoke_motor_brake(motor);         // slow-decay stop
+yoke_motor_coast(motor);         // fast-decay stop
 ```
 
 ## API

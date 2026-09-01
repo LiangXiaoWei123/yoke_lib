@@ -8,13 +8,14 @@ button power timing once per second.
 
 | Item | Default |
 | --- | --- |
-| I2C port | I2C0 |
+| I2C port | Automatically selected by `rootmaker_utils` |
 | SDA | GPIO41 |
 | SCL | GPIO40 |
 | 7-bit I2C address | `0x73` |
 
-Adjust `yoke_zxacc_maker_config_t` fields (or the `i2c_bus` handle) to match
-your wiring.
+The example uses the fixed RootMaker board pinout and the driver's default
+address. The bus is acquired through `rootmaker_utils` and released by
+`yoke_zxacc_maker_deinit()` when the device is no longer needed.
 
 ## Build and flash
 

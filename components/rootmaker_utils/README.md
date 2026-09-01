@@ -38,10 +38,14 @@ static rootmaker_port_t rootmaker_s_bus = {
 Drivers that are port-aware take a `rootmaker_port_t` instead of raw pins, e.g.:
 
 ```c
-yoke_ec11_handle_t ec11;
-yoke_ec11_config_t ec11_cfg = YOKE_EC11_DEFAULT_CONFIG();
-ec11_cfg.i2c_port = I2C_NUM_0;
-ESP_ERROR_CHECK(yoke_ec11_init(&ec11, rootmaker_port_1, &ec11_cfg));
+gpio_num_t ec11_pins[] = { GPIO_NUM_15, GPIO_NUM_16 };
+const rootmaker_port_t ec11_port = {
+    .type = ROOTMAKER_PORT_TYPE_RS_BUS,
+    .pin_num = 2,
+    .pins = ec11_pins,
+};
+yoke_ec11_handle_t ec11 = yoke_ec11_init(ec11_port);
+ESP_ERROR_CHECK(ec11 != NULL ? ESP_OK : ESP_FAIL);
 ```
 
 ## I2C bus pool
@@ -49,7 +53,11 @@ ESP_ERROR_CHECK(yoke_ec11_init(&ec11, rootmaker_port_1, &ec11_cfg));
 `rootmaker_new_i2c_bus()` returns an `i2c_master_bus_handle_t`, creating the
 bus only if it does not already exist for that I2C peripheral with the same
 SDA/SCL pins. Requesting an `i2c_num` that is already held by different pins
-returns `ESP_ERR_INVALID_STATE`.
+returns `ESP_ERR_INVALID_STATE`. Each successful call acquires one reference;
+call `rootmaker_del_i2c_bus()` once for each successful acquisition. The
+underlying bus is deleted only when the final reference is released. Acquire
+and release buses serially from the application lifecycle manager; I2C
+transactions themselves are managed by ESP-IDF.
 
 ## API
 

@@ -17,34 +17,28 @@ Component Registry.
 
 ## Usage
 
-The driver attaches to an existing ESP-IDF I2C master bus that you create
-first. The bus stays owned by your application, so other I2C devices can share
-it.
+The driver acquires or reuses an I2C master bus through `rootmaker_utils` using
+the first two pins of the supplied port. Other devices using the same pins can
+share that bus.
 
 ```c
 #include "yoke_ec11.h"
 
-i2c_master_bus_config_t bus_cfg = {
-    .i2c_port = I2C_NUM_0,
-    .sda_io_num = GPIO_NUM_15,
-    .scl_io_num = GPIO_NUM_16,
-    .clk_source = I2C_CLK_SRC_DEFAULT,
-    .glitch_ignore_cnt = 7,
-    .flags.enable_internal_pullup = true,
+gpio_num_t ec11_pins[] = { GPIO_NUM_15, GPIO_NUM_16 };
+const rootmaker_port_t ec11_port = {
+    .type = ROOTMAKER_PORT_TYPE_RS_BUS,
+    .pin_num = 2,
+    .pins = ec11_pins,
 };
-i2c_master_bus_handle_t bus;
-ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &bus));
 
-yoke_ec11_handle_t ec11;
-yoke_ec11_config_t cfg = YOKE_EC11_DEFAULT_CONFIG();
-cfg.verify_device_id = true;
-ESP_ERROR_CHECK(yoke_ec11_init(&ec11, bus, &cfg));
+yoke_ec11_handle_t ec11 = yoke_ec11_init(ec11_port);
+ESP_ERROR_CHECK(ec11 != NULL ? ESP_OK : ESP_FAIL);
 
 int16_t count;
-yoke_ec11_read_encoder_count(&ec11, &count);
+yoke_ec11_read_encoder_count(ec11, &count);
 
 yoke_ec11_rgb_t color = { .red = 0, .green = 255, .blue = 0 };
-yoke_ec11_set_ws2812(&ec11, 0, color);
+yoke_ec11_set_ws2812(ec11, 0, color);
 ```
 
 ## API

@@ -8,13 +8,16 @@ ZXACC-maker 是带 PY32F002B 从机的电源管理底板。ESP32-S3 通过 I2C �
 | --- | --- |
 | I2C 7 位地址 | `0x73` |
 | I2C 速率 | 100 kHz |
-| ESP32-S3 I2C 端口 | I2C0 |
+| ESP32-S3 I2C 端口 | 由 `rootmaker_utils` 自动选择可用端口 |
 | SCL | GPIO40 |
 | SDA | GPIO41 |
 
 > 地址 `0x73` 是 **7 位地址**。使用 ESP-IDF `i2c_master_*` API 时直接传入 `0x73`，不要左移为读写地址 `0xE6/0xE7`。
 
-可通过 `yoke_zxacc_maker_config_t` 修改地址、引脚和时钟；若 I2C 总线已由应用创建，传入 `config.i2c_bus` 即可共享该总线。
+当前 `yoke_zxacc_maker_init()` 使用固定的板载系统 I2C 引脚和设备地址，
+通过 `rootmaker_utils` 获取或复用共享 bus。初始化成功后，组件持有一个 bus
+引用；`yoke_zxacc_maker_deinit()` 只释放自己的设备和一个 bus 引用，最后一个
+使用者释放后底层 bus 才会被删除。
 
 ## 寄存器协议
 
@@ -24,13 +27,12 @@ ZXACC-maker 是带 PY32F002B 从机的电源管理底板。ESP32-S3 通过 I2C �
 | 地址 | 访问 | 数据 | 含义 | 对应 API |
 | --- | --- | --- | --- | --- |
 | `0x00` | 读 | `uint16_t` | PY32 固件版本 | `get_firmware_version()` |
-| `0x02` | 读 | `uint8_t` | 充电状态：`0` 充电中，`1` 未充电，`2` 已充满 | `get_status()` |
-| `0x03` | 读 | `uint32_t` | 电池电压，单位 mV | `get_status()` |
+| `0x02` | 读 | `uint8_t` | 充电状态：`0` 充电中，`1` 未充电，`2` 已充满 | `get_charge_state()` |
+| `0x03` | 读 | `uint32_t` | 电池电压，单位 mV | `get_battery_voltage()` |
 | `0x07` | 写 | `0x01` | 立即关机 | `shutdown()` |
 | `0x08` | 读/写 | `uint16_t` | 按键开机长按时长，单位 ms | `get/set_wakeup_time()` |
 | `0x0A` | 读/写 | `uint16_t` | 按键关机长按时长，单位 ms | `get/set_shutdown_time()` |
 | `0x0C` | 写 | `uint32_t` | 定时唤醒秒数；写入后底板进入低功耗，到达设定的时间后自动唤醒 | `set_timer_wakeup()` |
 
 `0x07` 与 `0x0C` 会改变供电状态，调试时请确认串口和程序下载工具不会因此断开。
-
 

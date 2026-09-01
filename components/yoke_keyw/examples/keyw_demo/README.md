@@ -7,11 +7,11 @@ then uses single click to toggle the LED and long press to log.
 
 | Item | Default |
 | --- | --- |
-| Button GPIO | GPIO17 (active high) |
+| Button GPIO | GPIO17 (active low) |
 | LED GPIO | GPIO18 |
 
-Adjust `KEYW_BUTTON_GPIO` / `KEYW_LED_GPIO` in `main/keyw_demo_main.c` to match
-your wiring.
+The current driver targets the fixed RootMaker Yoke pinout: GPIO17 for the
+button and GPIO18 for the indicator LED.
 
 ## Build and flash
 

@@ -14,7 +14,7 @@
 static const char *TAG = "screen_demo";
 
 void app_main(void) {
-    lv_display_t *disp = screen_with_lvgl_init();
+    lv_display_t *disp = yoke_screen_with_lvgl_init();
     if (disp == NULL) {
         ESP_LOGE(TAG, "screen init failed");
         return;

@@ -56,6 +56,12 @@ static size_t yoke_rgbw_encode(const void *data, size_t data_size, size_t symbol
     return 8;
 }
 
+static esp_err_t yoke_rgbw_transmit(void) {
+    const rmt_transmit_config_t config = { .loop_count = 0 };
+    esp_err_t ret = rmt_transmit(s_channel, s_encoder, s_pixels, s_pixels_size, &config);
+    return ret == ESP_OK ? rmt_tx_wait_all_done(s_channel, portMAX_DELAY) : ret;
+}
+
 esp_err_t yoke_rgbw_init(rootmaker_port_t port, uint16_t led_num) {
     if (led_num == 0U) {
         return ESP_ERR_INVALID_ARG;
@@ -147,7 +153,21 @@ esp_err_t yoke_rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t wh
         s_pixels[index + 2U] = blue;
         s_pixels[index + 3U] = white;
     }
-    const rmt_transmit_config_t config = { .loop_count = 0 };
-    esp_err_t ret = rmt_transmit(s_channel, s_encoder, s_pixels, s_pixels_size, &config);
-    return ret == ESP_OK ? rmt_tx_wait_all_done(s_channel, portMAX_DELAY) : ret;
+    return yoke_rgbw_transmit();
+}
+
+esp_err_t yoke_rgbw_set_pixel(uint16_t index, uint8_t red, uint8_t green, uint8_t blue, uint8_t white) {
+    if (s_channel == NULL || s_encoder == NULL || s_pixels == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if ((size_t)index >= s_pixels_size / 4U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t pixel_offset = (size_t)index * 4U;
+    s_pixels[pixel_offset] = green;
+    s_pixels[pixel_offset + 1U] = red;
+    s_pixels[pixel_offset + 2U] = blue;
+    s_pixels[pixel_offset + 3U] = white;
+    return yoke_rgbw_transmit();
 }

@@ -15,32 +15,39 @@ Run `idf.py reconfigure` (or `idf.py build`) to download it.
 
 ## Usage
 
-The driver creates its own I2C0 bus by default (SCL=GPIO40, SDA=GPIO41,
-address `0x73`), or it can join an I2C bus your application already created.
+The driver uses the on-board system I2C pins (SCL=GPIO40, SDA=GPIO41) and
+automatically acquires or reuses the matching bus through `rootmaker_utils`.
+The default device address is `0x73`.
 
 ```c
 #include "yoke_zxacc_maker.h"
 
-yoke_zxacc_maker_handle_t board;
-yoke_zxacc_maker_config_t config = YOKE_ZXACC_MAKER_DEFAULT_CONFIG();
-ESP_ERROR_CHECK(yoke_zxacc_maker_init(&board, &config));
+yoke_zxacc_maker_handle_t board = yoke_zxacc_maker_init();
+if (board == NULL) {
+    ESP_LOGE("app", "ZXACC-maker initialization failed");
+    return;
+}
 
 uint32_t voltage_mv;
-yoke_zxacc_maker_get_battery_voltage(&board, &voltage_mv);
+yoke_zxacc_maker_get_battery_voltage(board, &voltage_mv);
 yoke_zxacc_maker_charge_state_t charge;
-yoke_zxacc_maker_get_charge_state(&board, &charge);
+yoke_zxacc_maker_get_charge_state(board, &charge);
 
 uint16_t wake_ms;
-yoke_zxacc_maker_get_wakeup_time(&board, &wake_ms);
-yoke_zxacc_maker_set_wakeup_time(&board, 2000);
+yoke_zxacc_maker_get_wakeup_time(board, &wake_ms);
+yoke_zxacc_maker_set_wakeup_time(board, 2000);
+
+/* Call after all board API users have stopped. */
+yoke_zxacc_maker_deinit(board);
 ```
 
 `yoke_zxacc_maker_set_timer_wakeup()` and `yoke_zxacc_maker_shutdown()` change
 the board power state, so confirm your serial console and flashing tool will
 survive the power cut.
 
-The I2C address is a 7-bit address: pass `0x73` directly to the driver, do not
-shift it into the read/write form.
+The I2C address is fixed at `0x73` by the current board API. It is a 7-bit
+address, so pass it directly to ESP-IDF APIs and do not shift it into the
+read/write form.
 
 ## API
 

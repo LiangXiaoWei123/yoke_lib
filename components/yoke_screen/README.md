@@ -1,7 +1,7 @@
 # Yoke-Screen
 
 ESP-IDF driver for the RootMaker Yoke board display: a 240x240 ST7789 LCD on
-SPI, a CST816T touch controller on I2C1, and an LVGL port wired to both. Board
+SPI, a CST816T touch controller on the board system I2C bus, and an LVGL port wired to both. Board
 pins and panel orientation are fixed by the hardware design.
 
 ## Installation
@@ -19,7 +19,7 @@ resolves `espressif/esp_lvgl_port` and `lvgl/lvgl` automatically.
 ```c
 #include "yoke_screen.h"
 
-lv_display_t *disp = screen_with_lvgl_init();
+lv_display_t *disp = yoke_screen_with_lvgl_init();
 if (disp == NULL) {
     ESP_LOGE("demo", "screen init failed");
     return;
@@ -33,13 +33,18 @@ lv_obj_center(label);
 lvgl_port_unlock();
 ```
 
-The touch controller joins the I2C1 bus. If your application already created an
-I2C1 master bus (for example the ZXACC-maker power baseboard uses I2C1), the
-screen driver reuses it.
+The touch controller joins the system I2C bus identified by its board pins. If
+another component already acquired that bus, the screen driver reuses it.
+
+Call `yoke_screen_deinit()` only after stopping application LVGL activity. It removes
+the LVGL display and touch input, releases the touch device, and releases one
+reference to the shared system I2C bus. The bus is deleted only when its final
+reference is released. Treat this as final cleanup for the current boot
+session; the application should not use the returned display handle afterward.
 
 ### Direct bitmap drawing
 
-`screen_draw_bitmap()` writes an RGB565 bitmap straight to the panel. The
+`yoke_screen_draw_bitmap()` writes an RGB565 bitmap straight to the panel. The
 drawable area is 240x240. When LVGL is actively rendering, wrap direct panel
 access in the LVGL port lock to avoid concurrent display transactions.
 

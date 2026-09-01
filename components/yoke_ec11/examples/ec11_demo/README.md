@@ -8,12 +8,13 @@ onboard WS2812 LEDs.
 
 | Item | Default |
 | --- | --- |
-| I2C port | I2C0 |
+| I2C port | Automatically selected by `rootmaker_utils` |
 | SDA | GPIO15 |
 | SCL | GPIO16 |
 
-Adjust `I2C_SDA_GPIO` / `I2C_SCL_GPIO` in `main/ec11_demo_main.c` to match your
-board.
+Adjust `EC11_SDA_GPIO` / `EC11_SCL_GPIO` in `main/ec11_demo_main.c` to match
+your board. The driver acquires or reuses the matching bus through
+`rootmaker_utils`.
 
 ## Build and flash
 
