@@ -1,18 +1,19 @@
 # Motor demo
 
-Demonstrates the Yoke-motor driver: initializes a brushed DC motor, sweeps the
-speed forward, brakes, then runs a short reverse burst and coasts.
+Demonstrates the Yoke-motor driver by running a brushed DC motor forward at a
+fixed 60% speed.
 
 ## Hardware
 
 | Item | Default |
 | --- | --- |
-| H-bridge PWMA | GPIO19 |
-| H-bridge PWMB | GPIO20 |
+| Expansion port | RS_PORT1 |
+| H-bridge PWMA | PORT1_PIN1 (GPIO15) |
+| H-bridge PWMB | PORT1_PIN2 (GPIO16) |
 
-Adjust `MOTOR_PWMA_GPIO` / `MOTOR_PWMB_GPIO` in `main/motor_demo_main.c` to
-match your wiring. The motor coasts at init, so nothing spins until the sweep
-starts.
+Change `rootmaker_rs_port1` in `main/motor_demo_main.c` to select a different
+expansion port. Change `MOTOR_SPEED_PERCENT` to select a speed from 0 to 100.
+The motor starts after initialization and keeps running forward.
 
 ## Build and flash
 

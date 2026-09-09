@@ -1,8 +1,7 @@
 # Screen demo
 
 Demonstrates the Yoke-Screen driver: initializes the ST7789 display, the
-CST816T touch controller, and LVGL, then renders a counter that updates once
-per second.
+CST816T touch controller, and LVGL, then provides an interactive touch test.
 
 ## Hardware
 
@@ -19,4 +18,8 @@ idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-After boot the screen shows the demo label with an incrementing counter.
+After boot, press or drag inside the blue test area. The red dot follows the
+finger and the screen reports the pointer state, coordinates, and press count.
+Press and release coordinates are also printed to the serial monitor. This
+verifies the touch controller, LVGL input registration, coordinate direction,
+and continuous drag events.

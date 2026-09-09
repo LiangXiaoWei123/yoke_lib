@@ -7,11 +7,12 @@ and cycles red, green, blue, white, and off.
 
 | Item | Default |
 | --- | --- |
-| LED strip data GPIO | GPIO13 |
+| Expansion port | RS_PORT1 |
+| LED strip data pin | PORT1_PIN1 (GPIO15) |
 | LED count | 4 |
 
-Adjust `RGBW_DATA_GPIO` / `RGBW_LED_NUM` in `main/rgbw_demo_main.c` to match
-your strip.
+Change `rootmaker_rs_port1` or `RGBW_LED_NUM` in `main/rgbw_demo_main.c` to
+match your connection and strip.
 
 ## Build and flash
 

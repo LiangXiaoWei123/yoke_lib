@@ -7,11 +7,12 @@ then uses single click to toggle the LED and long press to log.
 
 | Item | Default |
 | --- | --- |
-| Button GPIO | GPIO17 (active low) |
-| LED GPIO | GPIO18 |
+| Expansion port | RS_PORT1 |
+| Button | PORT1_PIN1 (GPIO15, active low) |
+| LED | PORT1_PIN2 (GPIO16) |
 
-The current driver targets the fixed RootMaker Yoke pinout: GPIO17 for the
-button and GPIO18 for the indicator LED.
+Change `rootmaker_rs_port1` in `main/keyw_demo_main.c` to select a different
+expansion port.
 
 ## Build and flash
 

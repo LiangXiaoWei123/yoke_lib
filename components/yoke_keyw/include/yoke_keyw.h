@@ -11,6 +11,7 @@
 #include "esp_err.h"
 #include "driver/gpio.h"
 #include "iot_button.h"
+#include "rootmaker_utils.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,16 +23,22 @@ typedef void (*yoke_keyw_event_cb_t)(button_event_t event, void *user_data);
 typedef struct yoke_keyw *yoke_keyw_handle_t;
 
 /**
- * Initialize the KEYW module: button GPIO17 (active low) and indicator LED
- * GPIO18 (off). Long-press threshold defaults to 1500 ms; change it with
- * yoke_keyw_set_long_press_time(). Returns handle, or NULL on failure.
+ * Initialize the KEYW module on a RootMaker port. pins[0] is the active-low
+ * button and pins[1] is the indicator LED (initially off). Long-press threshold
+ * defaults to 1500 ms; change it with yoke_keyw_set_long_press_time(). Returns
+ * handle, or NULL on failure.
  */
-yoke_keyw_handle_t yoke_keyw_init(void);
+yoke_keyw_handle_t yoke_keyw_init(rootmaker_port_t port);
 
 /** Change the long-press threshold (ms). Applies immediately to an initialized driver. */
 esp_err_t yoke_keyw_set_long_press_time(yoke_keyw_handle_t keyw, uint16_t time_ms);
 
-/** Subscribe to one button event. Only subscribed events reach the application. */
+/**
+ * Subscribe to one button event. Without a DOUBLE_CLICK subscription,
+ * SINGLE_CLICK is dispatched immediately on each short release, so a physical
+ * double-click invokes it twice. Registering DOUBLE_CLICK enables delayed
+ * single/double classification using the button component's click window.
+ */
 esp_err_t yoke_keyw_register_event_callback(yoke_keyw_handle_t keyw, button_event_t event, yoke_keyw_event_cb_t callback, void *user_data);
 
 /** Unsubscribe from one button event. */

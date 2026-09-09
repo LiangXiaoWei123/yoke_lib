@@ -1,6 +1,5 @@
 /** @file yoke_keyw.c */
 #include "yoke_keyw.h"
-#include "rootmaker_pin.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -11,9 +10,7 @@
 
 #define TAG "yoke_keyw"
 
-#define YOKE_KEYW_BUTTON_GPIO PORT4_PIN1
-#define YOKE_KEYW_BUTTON_ACTIVE_LEVEL 0
-#define YOKE_KEYW_LED_GPIO PORT4_PIN2
+#define YOKE_KEYW_BUTTON_ACTIVE_LEVEL 1
 #define YOKE_KEYW_LED_INITIAL_ON false
 #define YOKE_KEYW_LONG_PRESS_TIME_MS 1500
 
@@ -21,6 +18,8 @@ struct yoke_keyw {
     void *button_handle;
     yoke_keyw_event_cb_t event_callbacks[BUTTON_EVENT_MAX];
     void *event_user_data[BUTTON_EVENT_MAX];
+    rootmaker_port_t port;
+    gpio_num_t button_gpio_num;
     gpio_num_t led_gpio_num;
     uint16_t long_press_time_ms;
     bool initialized;
@@ -32,6 +31,21 @@ static void yoke_keyw_button_callback(void *button_handle, void *user_data) {
     if (keyw == NULL)
         return;
     button_event_t event = iot_button_get_event((button_handle_t)keyw->button_handle);
+    bool double_click_enabled = keyw->event_callbacks[BUTTON_DOUBLE_CLICK] != NULL;
+
+    if (event == BUTTON_PRESS_UP && !double_click_enabled &&
+        keyw->event_callbacks[BUTTON_SINGLE_CLICK] != NULL &&
+        iot_button_get_pressed_time((button_handle_t)keyw->button_handle) < keyw->long_press_time_ms) {
+        /* Without a double-click subscriber there is no reason to wait for
+         * Espressif's multi-click window. Dispatch one single click on every
+         * short release, so two quick presses naturally produce two events. */
+        keyw->event_callbacks[BUTTON_SINGLE_CLICK](BUTTON_SINGLE_CLICK,
+                                                   keyw->event_user_data[BUTTON_SINGLE_CLICK]);
+    }
+
+    if ((event == BUTTON_SINGLE_CLICK || event == BUTTON_DOUBLE_CLICK) && !double_click_enabled) {
+        return;
+    }
     if (event < BUTTON_EVENT_MAX && keyw->event_callbacks[event] != NULL) {
         keyw->event_callbacks[event](event, keyw->event_user_data[event]);
     }
@@ -43,7 +57,7 @@ static esp_err_t keyw_create_button(yoke_keyw_handle_t keyw) {
         .short_press_time = 0,
     };
     const button_gpio_config_t gpio_config = {
-        .gpio_num = YOKE_KEYW_BUTTON_GPIO,
+        .gpio_num = keyw->button_gpio_num,
         .active_level = YOKE_KEYW_BUTTON_ACTIVE_LEVEL,
         .enable_power_save = false,
         .disable_pull = false,
@@ -54,7 +68,26 @@ static esp_err_t keyw_create_button(yoke_keyw_handle_t keyw) {
         return ret;
     }
     keyw->button_handle = button;
+
+    /* PRESS_UP provides immediate single-click dispatch when double-click is
+     * unused. SINGLE/DOUBLE provide delayed classification when it is used. */
+    ret = iot_button_register_cb(button, BUTTON_PRESS_UP, NULL, yoke_keyw_button_callback, keyw);
+    if (ret == ESP_OK) {
+        ret = iot_button_register_cb(button, BUTTON_SINGLE_CLICK, NULL, yoke_keyw_button_callback, keyw);
+    }
+    if (ret == ESP_OK) {
+        ret = iot_button_register_cb(button, BUTTON_DOUBLE_CLICK, NULL, yoke_keyw_button_callback, keyw);
+    }
+    if (ret != ESP_OK) {
+        (void)iot_button_delete(button);
+        keyw->button_handle = NULL;
+        return ret;
+    }
+
     for (int event = 0; event < BUTTON_EVENT_MAX; event++) {
+        if (event == BUTTON_PRESS_UP || event == BUTTON_SINGLE_CLICK || event == BUTTON_DOUBLE_CLICK) {
+            continue;
+        }
         if (keyw->event_callbacks[event] != NULL) {
             ret = iot_button_register_cb(button, (button_event_t)event, NULL, yoke_keyw_button_callback, keyw);
             if (ret != ESP_OK) {
@@ -67,13 +100,30 @@ static esp_err_t keyw_create_button(yoke_keyw_handle_t keyw) {
     return ESP_OK;
 }
 
-yoke_keyw_handle_t yoke_keyw_init(void) {
+yoke_keyw_handle_t yoke_keyw_init(rootmaker_port_t port) {
+    gpio_num_t button_gpio_num;
+    gpio_num_t led_gpio_num;
+    esp_err_t ret = rootmaker_get_port_pins(&port, &button_gpio_num, &led_gpio_num);
+    if (ret != ESP_OK || button_gpio_num == led_gpio_num) {
+        ESP_LOGE(TAG, "invalid port pins");
+        return NULL;
+    }
+
+    ret = rootmaker_use_port(&port);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "port in use: %s", esp_err_to_name(ret));
+        return NULL;
+    }
+
     yoke_keyw_handle_t keyw = calloc(1, sizeof(struct yoke_keyw));
     if (keyw == NULL) {
         ESP_LOGE(TAG, "no mem");
+        (void)rootmaker_release_port(&port);
         return NULL;
     }
-    keyw->led_gpio_num = YOKE_KEYW_LED_GPIO;
+    keyw->port = port;
+    keyw->button_gpio_num = button_gpio_num;
+    keyw->led_gpio_num = led_gpio_num;
     keyw->long_press_time_ms = YOKE_KEYW_LONG_PRESS_TIME_MS;
 
     const gpio_config_t led_gpio_config = {
@@ -83,15 +133,17 @@ yoke_keyw_handle_t yoke_keyw_init(void) {
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
-    esp_err_t ret = gpio_config(&led_gpio_config);
+    ret = gpio_config(&led_gpio_config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "led gpio config failed: %s", esp_err_to_name(ret));
+        (void)rootmaker_release_port(&keyw->port);
         free(keyw);
         return NULL;
     }
     ret = gpio_set_level(keyw->led_gpio_num, YOKE_KEYW_LED_INITIAL_ON ? 1 : 0);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "led level failed: %s", esp_err_to_name(ret));
+        (void)rootmaker_release_port(&keyw->port);
         free(keyw);
         return NULL;
     }
@@ -100,6 +152,7 @@ yoke_keyw_handle_t yoke_keyw_init(void) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "button init failed: %s", esp_err_to_name(ret));
         (void)gpio_set_level(keyw->led_gpio_num, 0);
+        (void)rootmaker_release_port(&keyw->port);
         free(keyw);
         return NULL;
     }
@@ -145,7 +198,11 @@ esp_err_t yoke_keyw_register_event_callback(yoke_keyw_handle_t keyw, button_even
     }
     if (keyw->event_callbacks[event] != NULL)
         return ESP_ERR_INVALID_STATE;
-    esp_err_t ret = iot_button_register_cb((button_handle_t)keyw->button_handle, event, NULL, yoke_keyw_button_callback, keyw);
+    esp_err_t ret = ESP_OK;
+    if (event != BUTTON_PRESS_UP && event != BUTTON_SINGLE_CLICK && event != BUTTON_DOUBLE_CLICK) {
+        ret = iot_button_register_cb((button_handle_t)keyw->button_handle, event, NULL,
+                                     yoke_keyw_button_callback, keyw);
+    }
     if (ret == ESP_OK) {
         keyw->event_callbacks[event] = callback;
         keyw->event_user_data[event] = user_data;
@@ -159,7 +216,10 @@ esp_err_t yoke_keyw_unregister_event_callback(yoke_keyw_handle_t keyw, button_ev
     }
     if (keyw->event_callbacks[event] == NULL)
         return ESP_ERR_NOT_FOUND;
-    esp_err_t ret = iot_button_unregister_cb((button_handle_t)keyw->button_handle, event, NULL);
+    esp_err_t ret = ESP_OK;
+    if (event != BUTTON_PRESS_UP && event != BUTTON_SINGLE_CLICK && event != BUTTON_DOUBLE_CLICK) {
+        ret = iot_button_unregister_cb((button_handle_t)keyw->button_handle, event, NULL);
+    }
     if (ret == ESP_OK) {
         keyw->event_callbacks[event] = NULL;
         keyw->event_user_data[event] = NULL;
@@ -177,6 +237,8 @@ esp_err_t yoke_keyw_deinit(yoke_keyw_handle_t keyw) {
     }
     keyw->button_handle = NULL;
     (void)gpio_set_level(keyw->led_gpio_num, 0);
+    (void)gpio_reset_pin(keyw->led_gpio_num);
+    (void)rootmaker_release_port(&keyw->port);
     free(keyw);
     return ret;
 }
