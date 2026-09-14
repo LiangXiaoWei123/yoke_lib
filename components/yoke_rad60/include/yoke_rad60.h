@@ -6,25 +6,25 @@
 #include "esp_err.h"
 #include "rootmaker_utils.h"
 
-/* 仅保留测距/检测结果的主数据结构 */
+/* Primary distance and detection result types. */
 typedef struct {
-    uint16_t range_val; /* 距离值,单位: cm */
-    int16_t angle_val;  /* 角度值,单位: 1° */
-    int16_t velo_val;   /* 速度值,单位: cm/s */
-    uint8_t objid;      /* 目标ID */
-    uint8_t reserved0;  /* 暂无含义 */
+    uint16_t range_val; /* Distance in cm. */
+    int16_t angle_val;  /* Angle in degrees. */
+    int16_t velo_val;   /* Velocity in cm/s. */
+    uint8_t objid;      /* Target ID. */
+    uint8_t reserved0;  /* Reserved. */
 } multitarget_obj_info_t;
 
 typedef struct {
-    uint8_t obj_num;               /* 目标数量 */
-    uint8_t reserved[3];           /* 暂无含义 */
-    multitarget_obj_info_t obj[2]; /* 目标信息，当前最多支持2个目标 */
+    uint8_t obj_num;               /* Number of detected targets. */
+    uint8_t reserved[3];           /* Reserved. */
+    multitarget_obj_info_t obj[2]; /* Target data; up to two targets are supported. */
 } multitarget_det_info_t;
 
 typedef struct {
-    bool is_comm_ok;                   /* 通信是否正常 */
-    bool is_detected;                  /* 是否检测到目标 */
-    multitarget_det_info_t radar_info;  /* 雷达数据 */
+    bool is_comm_ok;                   /* True when radar communication is healthy. */
+    bool is_detected;                  /* True when at least one target is detected. */
+    multitarget_det_info_t radar_info; /* Radar detection data. */
 } yoke_rad60_radar_data_t;
 
 esp_err_t yoke_rad60_init(rootmaker_port_t port);

@@ -114,7 +114,7 @@ esp_err_t yoke_rgbw_init(rootmaker_port_t port, uint16_t led_num) {
     return ESP_OK;
 
 fail:
-    ESP_LOGE(TAG, "初始化失败：%s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "initialization failed: %s", esp_err_to_name(ret));
     (void)yoke_rgbw_deinit();
     return ret;
 }

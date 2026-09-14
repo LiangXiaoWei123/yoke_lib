@@ -87,10 +87,10 @@ static const st7789_lcd_init_cmd_t st7789_boe154_init[] = {
     { 0xC6, (uint8_t[]){ 0x0F },                                                                               1,  0   },
     { 0xD0, (uint8_t[]){ 0xA4, 0xA1 },                                                                         2,  0   },
 
-    // GAMMA 正极
+    // Positive gamma
     { 0xE0, (uint8_t[]){ 0xD0, 0x08, 0x11, 0x08, 0x0C, 0x15, 0x39, 0x33, 0x50, 0x36, 0x13, 0x14, 0x29, 0x2D }, 14, 0   },
 
-    // GAMMA 负极
+    // Negative gamma
     { 0xE1, (uint8_t[]){ 0xD0, 0x08, 0x10, 0x08, 0x06, 0x06, 0x39, 0x44, 0x51, 0x0B, 0x16, 0x14, 0x2F, 0x31 }, 14, 0   },
 
     { 0x29, NULL,                                                                                              0,  0   }  // Display ON

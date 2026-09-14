@@ -1,57 +1,53 @@
-# IIC 地址定义
+# EC11 I2C Register Map
 
-| 地址 | 功能 | 类型 | 说明 |
-|------|------|------|------|
-| 0x00 | ID 高位 | R | 器件ID，仅能读，写入回复ACK。<br>固定值位0x4543 |
-| 0x01 | ID 低位 | R | |
-| 0x02 | KEY | R | 按键状态。 |
-| 0x03 | KEY按下时间 | R | 最后一次按下的计时。0.1s/LSB，读出为10时，代表长按为1秒。 |
-| 0x04 | CNT数值 高位 | R | 编码器计数值，16位有符号整型。<br>仅能读，写入回复ACK，但不修改值。 |
-| 0x05 | CNT数值 低位 | R | |
-| 0x06 | DIFF数值 高位 | R | 编码器差值，16位有符号整型。<br>仅能读，写入回复ACK，但不修改值。 |
-| 0x07 | DIFF数值 低位 | R | **该寄存器的低位读取后清零DIFF数值。** |
-| 0x08 | LED1 红色亮度 | R/W | |
-| 0x09 | LED1 绿色亮度 | R/W | LED1为远离连接器的LED |
-| 0x0A | LED1 蓝色亮度 | R/W | |
-| 0x0B | LED2 红色亮度 | R/W | |
-| 0x0C | LED2 绿色亮度 | R/W | LED1为靠近连接器的LED |
-| 0x0D | LED2 蓝色亮度 | R/W | |
-| 0x0E | CTRL1 | R/W | 配置寄存器1，可读写，写入0x5A后，进入测试模式，其他值仅保存。 |
-| 0x0F | CTRL2 | R/W | 配置寄存器2，可读写。功能见右侧表格。 |
-| ... | | | 超出地址的，写入操作回复ACK，实际不写入任何内存，读取操作回复值0xFF |
-| | | | 以上地址均可以连续读取或写入。 |
+| Address | Function | Access | Description |
+| --- | --- | --- | --- |
+| `0x00` | ID high byte | R | Device ID, read-only. Writes are acknowledged but ignored. The fixed ID is `0x4543`. |
+| `0x01` | ID low byte | R | |
+| `0x02` | KEY | R | Button state and press count. |
+| `0x03` | KEY press time | R | Duration of the most recent press, 0.1 s/LSB. A value of 10 represents 1 second. |
+| `0x04` | CNT high byte | R | Signed 16-bit accumulated encoder count. Writes are acknowledged but ignored. |
+| `0x05` | CNT low byte | R | |
+| `0x06` | DIFF high byte | R | Signed 16-bit encoder delta. Writes are acknowledged but ignored. |
+| `0x07` | DIFF low byte | R | **Reading this low byte clears the DIFF value.** |
+| `0x08` | LED1 red brightness | R/W | |
+| `0x09` | LED1 green brightness | R/W | LED1 is farther from the connector. |
+| `0x0A` | LED1 blue brightness | R/W | |
+| `0x0B` | LED2 red brightness | R/W | |
+| `0x0C` | LED2 green brightness | R/W | LED2 is nearer to the connector. |
+| `0x0D` | LED2 blue brightness | R/W | |
+| `0x0E` | CTRL1 | R/W | Writing `0x5A` enters test mode; other values are stored without another defined action. |
+| `0x0F` | CTRL2 | R/W | Configuration register 2; see its bit layout below. |
+| Other | | | Writes are acknowledged but ignored; reads return `0xFF`. |
 
----
+All defined registers support sequential reads and writes.
 
-# 0x02 KEY 寄存器定义
+## KEY register (`0x02`)
 
-| 位 | 名称 | 说明 |
-|----|------|------|
-| bit7 | RAW | 按键状态（滤波后）<br>按下=1 |
-| bit6 | res | |
-| bit5 | res | |
-| bit4 | res | |
-| bit3~bit0 | 按键计数 | 滑读的按键计数，最高为15，读取后清零。<br>若读出为3，则说明本次读取前有3次按下+弹起被忽略。 |
+| Bits | Name | Description |
+| --- | --- | --- |
+| bit7 | RAW | Debounced button state; 1 means pressed. |
+| bit6 | Reserved | |
+| bit5 | Reserved | |
+| bit4 | Reserved | |
+| bits3:0 | Press count | Latched completed-press count, up to 15; cleared after reading. A value of 3 means three press-and-release actions occurred since the previous read. |
 
-默认值：**无**
+The register has no fixed default value.
 
----
+## CTRL2 register (`0x0F`)
 
-# 0x0F CTRL2 寄存器定义
+| Bit | Name |
+| --- | --- |
+| bit7 | 1 |
+| bit6 | !A2 |
+| bit5 | !A1 |
+| bit4 | !A0 |
+| bit3 | 0 |
+| bit2 | A2 |
+| bit1 | A1 |
+| bit0 | A0 |
 
-| 位 | 名称 | 默认值 |
-|----|------|--------|
-| bit7 | 1 |  |
-| bit6 | !A2 |  |
-| bit5 | !A1 |  |
-| bit4 | !A0 |  |
-| bit3 | 0 |  |
-| bit2 | A2 |  |
-| bit1 | A1 |  |
-| bit0 | A0 | **0xF0** |
-
-**说明：**
-
-- 低4位取反，写入时若不等于低四位反的值，则回复ACK，但不操作写入。
-- res
-- 器件地址低3位（7bit地址），写入后保存进FLASH，复位后更新地址。
+The upper address bits are the inverse of the low three address bits. Invalid
+complement values are acknowledged but ignored. A2:A0 select the low three
+bits of the 7-bit device address. A valid write is saved to flash and takes
+effect after the peripheral resets.

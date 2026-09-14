@@ -1,38 +1,44 @@
-# ZXACC-maker I2C 接口
+# ZXACC-maker I2C Interface
 
-ZXACC-maker 是带 PY32F002B 从机的电源管理底板。ESP32-S3 通过 I2C 读取电池状态，并配置按键电源控制。
+ZXACC-maker is a power-management baseboard with a PY32F002B slave controller.
+The ESP32-S3 reads battery status and configures button-controlled power
+behavior over I2C.
 
-## 默认连接
+## Default connection
 
-| 项目 | 值 |
+| Item | Value |
 | --- | --- |
-| I2C 7 位地址 | `0x73` |
-| I2C 速率 | 100 kHz |
-| ESP32-S3 I2C 端口 | 由 `rootmaker_utils` 自动选择可用端口 |
+| 7-bit I2C address | `0x73` |
+| I2C clock | 100 kHz |
+| ESP32-S3 I2C controller | Selected automatically by `rootmaker_utils` |
 | SCL | GPIO40 |
 | SDA | GPIO41 |
 
-> 地址 `0x73` 是 **7 位地址**。使用 ESP-IDF `i2c_master_*` API 时直接传入 `0x73`，不要左移为读写地址 `0xE6/0xE7`。
+> `0x73` is a **7-bit address**. Pass it directly to the ESP-IDF
+> `i2c_master_*` APIs; do not shift it into the `0xE6/0xE7` wire-format
+> read/write addresses.
 
-当前 `yoke_zxacc_maker_init()` 使用固定的板载系统 I2C 引脚和设备地址，
-通过 `rootmaker_utils` 获取或复用共享 bus。初始化成功后，组件持有一个 bus
-引用；`yoke_zxacc_maker_deinit()` 只释放自己的设备和一个 bus 引用，最后一个
-使用者释放后底层 bus 才会被删除。
+`yoke_zxacc_maker_init()` uses the fixed onboard system-I2C pins and device
+address. It acquires or reuses the shared bus through `rootmaker_utils` and
+holds one bus reference after successful initialization.
+`yoke_zxacc_maker_deinit()` removes only its device and releases one reference.
+The underlying bus is deleted after its final user releases it.
 
-## 寄存器协议
+## Register protocol
 
-所有多字节数值使用小端序（最低有效字节在前），与
-`yoke_zxacc_maker` 驱动和 `py32_test` 例程保持一致。
+All multibyte values use little-endian byte order (least-significant byte
+first), matching the `yoke_zxacc_maker` driver and the `py32_test` example.
 
-| 地址 | 访问 | 数据 | 含义 | 对应 API |
+| Address | Access | Data | Description | API |
 | --- | --- | --- | --- | --- |
-| `0x00` | 读 | `uint16_t` | PY32 固件版本 | `get_firmware_version()` |
-| `0x02` | 读 | `uint8_t` | 充电状态：`0` 充电中，`1` 未充电，`2` 已充满 | `get_charge_state()` |
-| `0x03` | 读 | `uint32_t` | 电池电压，单位 mV | `get_battery_voltage()` |
-| `0x07` | 写 | `0x01` | 立即关机 | `shutdown()` |
-| `0x08` | 读/写 | `uint16_t` | 按键开机长按时长，单位 ms | `get/set_wakeup_time()` |
-| `0x0A` | 读/写 | `uint16_t` | 按键关机长按时长，单位 ms | `get/set_shutdown_time()` |
-| `0x0C` | 写 | `uint32_t` | 定时唤醒秒数；写入后底板进入低功耗，到达设定的时间后自动唤醒 | `set_timer_wakeup()` |
+| `0x00` | Read | `uint16_t` | PY32 firmware version | `get_firmware_version()` |
+| `0x02` | Read | `uint8_t` | Charge state: 0 charging, 1 not charging, 2 fully charged | `get_charge_state()` |
+| `0x03` | Read | `uint32_t` | Battery voltage in mV | `get_battery_voltage()` |
+| `0x07` | Write | `0x01` | Shut down immediately | `shutdown()` |
+| `0x08` | Read/Write | `uint16_t` | Power-on button hold time in ms | `get/set_wakeup_time()` |
+| `0x0A` | Read/Write | `uint16_t` | Shutdown button hold time in ms | `get/set_shutdown_time()` |
+| `0x0C` | Write | `uint32_t` | Timed wake-up delay in seconds; writing it enters low-power mode until the timer wakes the board | `set_timer_wakeup()` |
 
-`0x07` 与 `0x0C` 会改变供电状态，调试时请确认串口和程序下载工具不会因此断开。
-
+Registers `0x07` and `0x0C` change the board's power state. During debugging,
+make sure an expected power transition will not unexpectedly disconnect the
+serial console or programming tool.

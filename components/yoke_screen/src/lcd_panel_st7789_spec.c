@@ -191,7 +191,6 @@ static esp_err_t panel_st7789_init(esp_lcd_panel_t *panel) {
     esp_lcd_panel_io_handle_t io = st7789->io;
     const st7789_lcd_init_cmd_t *init_cmds = st7789->init_cmds;
     uint16_t init_cmds_size = st7789->init_cmds_size;
-    bool is_cmd_overwritten = false;
 
     if (!init_cmds || init_cmds_size == 0) {
         init_cmds = vendor_specific_init_default;
@@ -207,6 +206,33 @@ static esp_err_t panel_st7789_init(esp_lcd_panel_t *panel) {
     }
     if (!init_cmd) {
         init_cmd = &vendor_specific_init_default[0];
+    }
+
+    /* Merge standard register overrides from the vendor sequence before
+     * sending them. This preserves vendor-specific values without issuing
+     * the same command twice or producing misleading overwrite warnings. */
+    for (int i = 0; i < init_cmds_size; i++) {
+        const uint8_t *data = (const uint8_t *)init_cmds[i].data;
+        switch (init_cmds[i].cmd) {
+            case LCD_CMD_MADCTL:
+                if (data && init_cmds[i].data_bytes >= 1) {
+                    st7789->madctl_val = data[0];
+                }
+                break;
+            case LCD_CMD_COLMOD:
+                if (data && init_cmds[i].data_bytes >= 1) {
+                    st7789->colmod_val = data[0];
+                }
+                break;
+            case ST7789_CMD_RAMCTRL:
+                if (data && init_cmds[i].data_bytes >= 2) {
+                    st7789->ramctl_val_1 = data[0];
+                    st7789->ramctl_val_2 = data[1];
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, init_cmd->cmd, init_cmd->data, init_cmd->data_bytes), TAG, "io tx param failed");
@@ -232,34 +258,13 @@ static esp_err_t panel_st7789_init(esp_lcd_panel_t *panel) {
         if (&init_cmds[i] == init_cmd) {
             continue;
         }
-        is_cmd_overwritten = false;
-        const uint8_t *data = (const uint8_t *)init_cmds[i].data;
         switch (init_cmds[i].cmd) {
             case LCD_CMD_MADCTL:
-                if (data && init_cmds[i].data_bytes > 0) {
-                    st7789->madctl_val = data[0];
-                }
-                is_cmd_overwritten = true;
-                break;
             case LCD_CMD_COLMOD:
-                if (data && init_cmds[i].data_bytes > 0) {
-                    st7789->colmod_val = data[0];
-                }
-                is_cmd_overwritten = true;
-                break;
             case ST7789_CMD_RAMCTRL:
-                if (data && init_cmds[i].data_bytes >= 2) {
-                    st7789->ramctl_val_1 = data[0];
-                    st7789->ramctl_val_2 = data[1];
-                }
-                is_cmd_overwritten = true;
-                break;
+                continue;
             default:
                 break;
-        }
-
-        if (is_cmd_overwritten) {
-            ESP_LOGW(TAG, "The %02Xh command has been used and will be overwritten by external initialization sequence", init_cmds[i].cmd);
         }
 
         ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, init_cmds[i].cmd, init_cmds[i].data, init_cmds[i].data_bytes), TAG, "io tx param failed");
