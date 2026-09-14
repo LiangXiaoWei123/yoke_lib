@@ -120,8 +120,16 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
 
     uint16_t device_id = 0;
     ret = yoke_ec11_read_device_id(yoke, &device_id);
-    if (ret != ESP_OK || device_id != YOKE_EC11_DEVICE_ID) {
-        ESP_LOGE(TAG, "device id check failed: 0x%04X (%s)", device_id, esp_err_to_name(ret));
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "device ID read failed: address=0x%02X SDA=GPIO%d SCL=GPIO%d: %s (0x%x). "
+                      "Check module power, common GND, SDA/SCL order and pull-ups",
+                 yoke->device_address, port.pins[0], port.pins[1], esp_err_to_name(ret), ret);
+        (void)yoke_ec11_deinit(yoke);
+        return NULL;
+    }
+    if (device_id != YOKE_EC11_DEVICE_ID) {
+        ESP_LOGE(TAG, "unexpected device ID at address 0x%02X: got 0x%04X, expected 0x%04X",
+                 yoke->device_address, device_id, YOKE_EC11_DEVICE_ID);
         (void)yoke_ec11_deinit(yoke);
         return NULL;
     }

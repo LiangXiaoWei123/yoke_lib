@@ -244,7 +244,7 @@ static void keyw_init(void) {
         return;
     }
     const ui_if_port_config_t *port = if_port_get_config(UI_IF_PORT_P4);
-    s_keyw = yoke_keyw_init();
+    s_keyw = yoke_keyw_init(port->port);
     if (s_keyw == NULL) {
         ESP_LOGE(TAG, "KEYW init failed");
         return;
@@ -267,7 +267,8 @@ static void keyw_init(void) {
     }
     s_keyw_port = UI_IF_PORT_P4;
     (void)yoke_keyw_set_led(s_keyw, s_keyw_led_on);
-    ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO17, LED=GPIO18", port->name);
+    ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO%d, LED=GPIO%d",
+             port->name, port->port.pins[0], port->port.pins[1]);
 }
 
 static void keyw_deinit(void) {
