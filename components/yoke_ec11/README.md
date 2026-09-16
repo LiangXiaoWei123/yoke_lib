@@ -9,7 +9,7 @@ Add the component to your project's `idf_component.yml`:
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_ec11: "^1.0.0"
+  ryzobeezero/yoke_ec11: "^1.0.0"
 ```
 
 Then run `idf.py reconfigure` (or `idf.py build`) to download it from the ESP

@@ -8,7 +8,7 @@ button power timing, timed wake-up, and shutdown.
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_zxacc_maker: "^1.0.0"
+  ryzobeezero/yoke_zxacc_maker: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it.

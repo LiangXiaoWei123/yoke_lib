@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,8 +92,6 @@ static const ui_if_port_config_t *if_port_get_config(ui_if_port_t port) {
 
 typedef enum { UI_PAGE_DASHBOARD = 0, UI_PAGE_EC11, UI_PAGE_RGBW, UI_PAGE_RADAR, UI_PAGE_MOTOR, UI_PAGE_ZXACC, UI_PAGE_KEYW, UI_PAGE_MAX } ui_page_t;
 
-#define KEYW_LOG_MAX 8U
-
 static lv_obj_t *s_pages[UI_PAGE_MAX];
 static ui_page_t s_current_page = UI_PAGE_DASHBOARD;
 static lv_obj_t *s_status_label;
@@ -134,14 +133,18 @@ static uint32_t s_zxacc_shutdown_seconds = 0;
 static lv_obj_t *s_motor_state_label;
 
 /* KEYW page widgets */
-static lv_obj_t *s_keyw_log_labels[4];
+static lv_obj_t *s_keyw_state_dot;
+static lv_obj_t *s_keyw_state_label;
+static lv_obj_t *s_keyw_count_label;
+static lv_obj_t *s_keyw_last_event_label;
 static lv_obj_t *s_keyw_led_switch;
-static bool s_keyw_led_on = true;
+static bool s_keyw_led_on;
 
-/* KEYW event ring buffer */
-static button_event_t s_keyw_event_log[KEYW_LOG_MAX];
-static uint8_t s_keyw_event_head;
-static uint8_t s_keyw_event_count;
+/* KEYW state is written by the button task and read by the LVGL task. */
+static uint32_t s_keyw_press_count;
+static button_event_t s_keyw_last_event;
+static bool s_keyw_has_event;
+static bool s_keyw_pressed;
 static portMUX_TYPE s_keyw_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static const char *keyw_event_to_string(button_event_t event) {
@@ -223,13 +226,16 @@ static void rgbw_deinit(void) {
 
 static void keyw_event_callback(button_event_t event, void *user_data) {
     (void)user_data;
-    ESP_LOGI(TAG, "Yoke-KEYW event: %s", keyw_event_to_string(event));
 
     portENTER_CRITICAL(&s_keyw_mux);
-    s_keyw_event_log[s_keyw_event_head] = event;
-    s_keyw_event_head = (s_keyw_event_head + 1) % KEYW_LOG_MAX;
-    if (s_keyw_event_count < KEYW_LOG_MAX)
-        ++s_keyw_event_count;
+    s_keyw_last_event = event;
+    s_keyw_has_event = true;
+    if (event == BUTTON_PRESS_DOWN) {
+        s_keyw_pressed = true;
+        ++s_keyw_press_count;
+    } else if (event == BUTTON_PRESS_UP || event == BUTTON_LONG_PRESS_UP || event == BUTTON_PRESS_END) {
+        s_keyw_pressed = false;
+    }
     portEXIT_CRITICAL(&s_keyw_mux);
 }
 
@@ -243,7 +249,7 @@ static void keyw_init(void) {
         ESP_LOGE(TAG, "KEYW init blocked: %s is in use by %s", if_port_get_config(s_global_port)->name, owner);
         return;
     }
-    const ui_if_port_config_t *port = if_port_get_config(UI_IF_PORT_P4);
+    const ui_if_port_config_t *port = if_port_get_config(s_global_port);
     s_keyw = yoke_keyw_init(port->port);
     if (s_keyw == NULL) {
         ESP_LOGE(TAG, "KEYW init failed");
@@ -265,7 +271,10 @@ static void keyw_init(void) {
         ESP_LOGE(TAG, "KEYW init failed: %s", esp_err_to_name(ret));
         return;
     }
-    s_keyw_port = UI_IF_PORT_P4;
+    s_keyw_port = s_global_port;
+    portENTER_CRITICAL(&s_keyw_mux);
+    s_keyw_pressed = false;
+    portEXIT_CRITICAL(&s_keyw_mux);
     (void)yoke_keyw_set_led(s_keyw, s_keyw_led_on);
     ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO%d, LED=GPIO%d",
              port->name, port->port.pins[0], port->port.pins[1]);
@@ -277,12 +286,18 @@ static void keyw_deinit(void) {
         return;
     }
     esp_err_t ret = yoke_keyw_deinit(s_keyw);
+    /* The driver releases the instance even if button cleanup reports an
+     * error, so the handle must never be retained here. */
+    s_keyw = NULL;
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "KEYW deinit failed: %s", esp_err_to_name(ret));
-        return;
     }
-    s_keyw = NULL;
-    ESP_LOGI(TAG, "KEYW deinitialized");
+    portENTER_CRITICAL(&s_keyw_mux);
+    s_keyw_pressed = false;
+    portEXIT_CRITICAL(&s_keyw_mux);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "KEYW deinitialized");
+    }
 }
 
 static bool if_port_equals(ui_if_port_t lhs, ui_if_port_t rhs) {
@@ -541,7 +556,6 @@ static void ui_port_button_click(lv_event_t *event) {
 
     const ui_if_port_config_t *selected = if_port_get_config(s_global_port);
     ESP_LOGI(TAG, "Global port selected: %s (%d/%d)", selected->name, selected->port.pins[0], selected->port.pins[1]);
-    ESP_LOGW(TAG, "New port applies to next init of EC11/Radar/motor/ZXACC");
 
     ui_refresh_port_selector();
 }
@@ -1435,22 +1449,24 @@ static void ui_update_status_bar(void) {
 /* -------------------- KEYW page -------------------- */
 
 static void ui_refresh_keyw(void) {
-    uint8_t count;
-    uint8_t head;
+    uint32_t press_count;
+    button_event_t last_event;
+    bool has_event;
+    bool pressed;
     portENTER_CRITICAL(&s_keyw_mux);
-    count = s_keyw_event_count;
-    head = s_keyw_event_head;
+    press_count = s_keyw_press_count;
+    last_event = s_keyw_last_event;
+    has_event = s_keyw_has_event;
+    pressed = s_keyw_pressed;
     portEXIT_CRITICAL(&s_keyw_mux);
 
-    for (int i = 0; i < 4; ++i) {
-        if (i < count) {
-            uint8_t idx = (head - 1 - i + KEYW_LOG_MAX) % KEYW_LOG_MAX;
-            button_event_t event = s_keyw_event_log[idx];
-            lv_label_set_text_fmt(s_keyw_log_labels[i], "%u. %s", (unsigned)(count - i), keyw_event_to_string(event));
-        } else {
-            lv_label_set_text(s_keyw_log_labels[i], "");
-        }
-    }
+    lv_label_set_text_fmt(s_keyw_count_label, "%" PRIu32, press_count);
+    lv_label_set_text(s_keyw_state_label, s_keyw == NULL ? "Stopped" : (pressed ? "Pressed" : "Ready"));
+    lv_obj_set_style_text_color(s_keyw_state_label,
+                                s_keyw == NULL ? UI_COLOR_SUBTEXT : (pressed ? UI_COLOR_ACCENT : UI_COLOR_SUCCESS), 0);
+    lv_obj_set_style_bg_color(s_keyw_state_dot,
+                              s_keyw == NULL ? UI_COLOR_CARD : (pressed ? UI_COLOR_ACCENT : UI_COLOR_SUCCESS), 0);
+    lv_label_set_text_fmt(s_keyw_last_event_label, "Last: %s", has_event ? keyw_event_to_string(last_event) : "--");
 }
 
 static void keyw_led_changed(lv_event_t *event) {
@@ -1464,42 +1480,78 @@ static void keyw_click(lv_event_t *event) {
     int action = (int)(intptr_t)lv_event_get_user_data(event);
     if (action == 0)
         keyw_init();
-    if (action == 1)
+    if (action == 1) {
         keyw_deinit();
+        s_keyw_led_on = false;
+        lv_obj_remove_state(s_keyw_led_switch, LV_STATE_CHECKED);
+    }
+    ui_refresh_keyw();
+}
+
+static void keyw_reset_click(lv_event_t *event) {
+    (void)event;
+    portENTER_CRITICAL(&s_keyw_mux);
+    s_keyw_press_count = 0;
+    s_keyw_has_event = false;
+    portEXIT_CRITICAL(&s_keyw_mux);
+    ui_refresh_keyw();
 }
 
 static void ui_page_keyw_create(lv_obj_t *parent) {
     ui_title_bar_create(parent, "Key");
 
+    lv_obj_t *summary = lv_obj_create(parent);
+    lv_obj_set_size(summary, 204, 91);
+    lv_obj_set_pos(summary, 18, 51);
+    lv_obj_set_style_bg_color(summary, UI_COLOR_SURFACE, 0);
+    lv_obj_set_style_radius(summary, 14, 0);
+    lv_obj_set_style_border_width(summary, 0, 0);
+    lv_obj_set_style_pad_all(summary, 0, 0);
+    lv_obj_remove_flag(summary, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *count_cap = lv_label_create(summary);
+    lv_label_set_text(count_cap, "PRESS COUNT");
+    lv_obj_set_style_text_color(count_cap, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_pos(count_cap, 12, 9);
+
+    s_keyw_count_label = lv_label_create(summary);
+    lv_label_set_text(s_keyw_count_label, "0");
+    lv_obj_set_style_text_color(s_keyw_count_label, UI_COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(s_keyw_count_label, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(s_keyw_count_label, 12, 28);
+
+    s_keyw_state_dot = ui_make_dot(summary, 126, 18, UI_COLOR_CARD);
+    s_keyw_state_label = lv_label_create(summary);
+    lv_label_set_text(s_keyw_state_label, "Stopped");
+    lv_obj_set_style_text_color(s_keyw_state_label, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_pos(s_keyw_state_label, 142, 14);
+
+    s_keyw_last_event_label = lv_label_create(summary);
+    lv_label_set_text(s_keyw_last_event_label, "Last: --");
+    lv_obj_set_style_text_color(s_keyw_last_event_label, UI_COLOR_SUBTEXT, 0);
+    lv_obj_set_pos(s_keyw_last_event_label, 12, 67);
+
     lv_obj_t *led_cap = lv_label_create(parent);
-    lv_label_set_text(led_cap, "LED");
-    lv_obj_set_style_text_color(led_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(led_cap, 18, 54);
+    lv_label_set_text(led_cap, "Indicator LED");
+    lv_obj_set_style_text_color(led_cap, UI_COLOR_TEXT, 0);
+    lv_obj_set_pos(led_cap, 18, 158);
 
     s_keyw_led_switch = lv_switch_create(parent);
-    lv_obj_set_pos(s_keyw_led_switch, 18, 74);
-    lv_obj_add_state(s_keyw_led_switch, LV_STATE_CHECKED);
+    lv_obj_set_size(s_keyw_led_switch, 48, 25);
+    lv_obj_set_pos(s_keyw_led_switch, 174, 153);
     lv_obj_add_event_cb(s_keyw_led_switch, keyw_led_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
-    lv_obj_t *log_cap = lv_label_create(parent);
-    lv_label_set_text(log_cap, "EVENTS");
-    lv_obj_set_style_text_color(log_cap, UI_COLOR_SUBTEXT, 0);
-    lv_obj_set_pos(log_cap, 18, 110);
-
-    for (int i = 0; i < 4; ++i) {
-        s_keyw_log_labels[i] = lv_label_create(parent);
-        lv_label_set_text(s_keyw_log_labels[i], "");
-        lv_obj_set_style_text_color(s_keyw_log_labels[i], UI_COLOR_TEXT, 0);
-        lv_obj_set_pos(s_keyw_log_labels[i], 18, 130 + i * 18);
-    }
-
-    lv_obj_t *init_btn = ui_make_button(parent, "Start", UI_COLOR_ACCENT, 94, 30);
-    lv_obj_set_pos(init_btn, 18, 204);
+    lv_obj_t *init_btn = ui_make_button(parent, "Start", UI_COLOR_ACCENT, 66, 32);
+    lv_obj_set_pos(init_btn, 12, 198);
     lv_obj_add_event_cb(init_btn, keyw_click, LV_EVENT_CLICKED, (void *)0);
 
-    lv_obj_t *stop_btn = ui_make_button(parent, "Stop", UI_COLOR_DANGER, 94, 30);
-    lv_obj_set_pos(stop_btn, 128, 204);
+    lv_obj_t *stop_btn = ui_make_button(parent, "Stop", UI_COLOR_DANGER, 66, 32);
+    lv_obj_set_pos(stop_btn, 87, 198);
     lv_obj_add_event_cb(stop_btn, keyw_click, LV_EVENT_CLICKED, (void *)1);
+
+    lv_obj_t *reset_btn = ui_make_button(parent, "Reset", UI_COLOR_CARD, 66, 32);
+    lv_obj_set_pos(reset_btn, 162, 198);
+    lv_obj_add_event_cb(reset_btn, keyw_reset_click, LV_EVENT_CLICKED, NULL);
 }
 
 /* -------------------- Timers & entry -------------------- */

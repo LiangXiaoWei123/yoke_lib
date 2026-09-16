@@ -11,5 +11,5 @@ issues: "https://github.com/LiangXiaoWei123/yoke_lib/issues"
 dependencies:
   idf:
     version: ">=5.3"
-  LiangXiaoWei123/rootmaker_utils:
+  ryzobeezero/rootmaker_utils:
     version: "^1.0.0"

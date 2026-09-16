@@ -65,12 +65,12 @@ dependencies:
       type: local
     version: 1.0.0
 direct_dependencies:
-- LiangXiaoWei123/rootmaker_utils
 - espressif/bdc_motor
 - espressif/button
 - espressif/esp_lvgl_port
 - idf
 - lvgl/lvgl
-manifest_hash: ea369379734c49db25c9f9a92bfb58ea40b0ae3159095c7081efccb0a374c610
+- ryzobeezero/rootmaker_utils
+manifest_hash: c082250e115d39f364f3654aaad98d1611ff77c18f76545e7847490a1202a7ea
 target: esp32s3
 version: 2.0.0

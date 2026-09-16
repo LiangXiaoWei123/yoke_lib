@@ -8,7 +8,7 @@ pins and panel orientation are fixed by the hardware design.
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_screen: "^1.0.0"
+  ryzobeezero/yoke_screen: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it. The component

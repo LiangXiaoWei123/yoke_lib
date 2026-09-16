@@ -1,5 +1,5 @@
 dependencies:
   idf:
     version: ">=5.3"
-  LiangXiaoWei123/yoke_ec11:
+  ryzobeezero/yoke_ec11:
     version: "^1.0.0"

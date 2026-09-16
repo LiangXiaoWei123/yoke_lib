@@ -8,7 +8,7 @@ model and an I2C master bus pool shared by the peripheral drivers
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/rootmaker_utils: "^1.0.0"
+  ryzobeezero/rootmaker_utils: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it.

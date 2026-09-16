@@ -7,7 +7,7 @@ supported at a time; all LEDs are set to the same color.
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_rgbw: "^1.0.0"
+  ryzobeezero/yoke_rgbw: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it.

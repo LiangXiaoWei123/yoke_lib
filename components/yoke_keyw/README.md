@@ -9,7 +9,7 @@ component.
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_keyw: "^1.0.0"
+  ryzobeezero/yoke_keyw: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it.

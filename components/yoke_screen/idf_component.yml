@@ -17,5 +17,5 @@ dependencies:
   lvgl/lvgl:
     version: "^9.4.0"
     require: public
-  LiangXiaoWei123/rootmaker_utils:
+  ryzobeezero/rootmaker_utils:
     version: "^1.0.0"

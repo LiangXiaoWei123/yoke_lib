@@ -236,8 +236,9 @@ esp_err_t yoke_keyw_deinit(yoke_keyw_handle_t keyw) {
         ret = iot_button_delete((button_handle_t)keyw->button_handle);
     }
     keyw->button_handle = NULL;
+    /* Keep the pin actively low. gpio_reset_pin() would make it high
+     * impedance, allowing the external LED circuit to pull it back on. */
     (void)gpio_set_level(keyw->led_gpio_num, 0);
-    (void)gpio_reset_pin(keyw->led_gpio_num);
     (void)rootmaker_release_port(&keyw->port);
     free(keyw);
     return ret;

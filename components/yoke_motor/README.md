@@ -9,7 +9,7 @@ component.
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_motor: "^1.0.0"
+  ryzobeezero/yoke_motor: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it.

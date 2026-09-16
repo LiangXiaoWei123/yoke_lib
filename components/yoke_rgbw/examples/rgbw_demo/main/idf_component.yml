@@ -1,5 +1,5 @@
 dependencies:
   idf:
     version: ">=5.3"
-  LiangXiaoWei123/yoke_rgbw:
+  ryzobeezero/yoke_rgbw:
     version: "^1.0.0"

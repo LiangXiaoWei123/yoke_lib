@@ -1,83 +1,94 @@
-# Rootmaker ESP-IDF 组件库
+# RootMaker ESP-IDF Component Library
 
-本仓库是 RootMaker 系列外设的 ESP-IDF 组件集合。每个外设独立封装为一个组件，
-组件内自带 `examples/` 示例工程，所有组件都可独立发布到
-[ESP 组件库](https://components.espressif.com/)。
+[English](README.md) | [中文](README_CN.md)
 
-根目录的 `main` 是一个串口联调控制台，用于同时测试全部组件。
+This repository contains a collection of ESP-IDF components for RootMaker
+peripherals. Each peripheral is packaged as an independent component with its
+own example project under `examples/`, and every component can be published
+independently to the [ESP Component Registry](https://components.espressif.com/).
 
-## 组件列表
+The root-level `main` directory contains an LVGL-based touchscreen integration
+demo for testing the peripheral components.
 
-| 组件 | 功能 | 发布名 |
+## Components
+
+| Component | Description | Registry name |
 | --- | --- | --- |
-| `yoke_ec11` | EC11 编码器、按键与板载两颗 WS2812 | `LiangXiaoWei123/yoke_ec11` |
-| `yoke_keyw` | 按键 + GPIO 指示灯模块 | `LiangXiaoWei123/yoke_keyw` |
-| `yoke_motor` | 有刷直流电机（MCPWM） | `LiangXiaoWei123/yoke_motor` |
-| `yoke_rgbw` | 外接 RGBW WS2812 灯带 | `LiangXiaoWei123/yoke_rgbw` |
-| `yoke_rad60` | RAD60 UART 雷达模块 | `LiangXiaoWei123/yoke_rad60` |
-| `yoke_screen` | ST7789 屏幕 + CST816T 触摸 + LVGL | `LiangXiaoWei123/yoke_screen` |
-| `yoke_zxacc_maker` | ZXACC-maker PY32 电源管理底板 | `LiangXiaoWei123/yoke_zxacc_maker` |
+| `rootmaker_utils` | Shared interface-port model and I2C bus pool | `ryzobeezero/rootmaker_utils` |
+| `yoke_ec11` | EC11 encoder, button, and two onboard WS2812 LEDs | `ryzobeezero/yoke_ec11` |
+| `yoke_keyw` | Button and GPIO indicator LED module | `ryzobeezero/yoke_keyw` |
+| `yoke_motor` | Brushed DC motor driver using MCPWM | `ryzobeezero/yoke_motor` |
+| `yoke_rgbw` | External RGBW WS2812 LED strip | `ryzobeezero/yoke_rgbw` |
+| `yoke_rad60` | RAD60 UART radar module | `ryzobeezero/yoke_rad60` |
+| `yoke_screen` | ST7789 display, CST816T touch controller, and LVGL | `ryzobeezero/yoke_screen` |
+| `yoke_zxacc_maker` | ZXACC-maker PY32 power-management baseboard | `ryzobeezero/yoke_zxacc_maker` |
 
-每个组件的目录结构：
+Each component follows this directory structure:
 
 ```text
 components/<name>/
-├── CMakeLists.txt        # 组件构建定义
-├── idf_component.yml     # 版本、依赖与仓库元信息（上传时读取）
-├── Kconfig               # 组件配置项（yoke_screen、yoke_rad60 等）
+├── CMakeLists.txt        # Component build definition
+├── idf_component.yml     # Version, dependencies, and registry metadata
+├── Kconfig               # Component options (where applicable)
 ├── README.md
 ├── CHANGELOG.md
 ├── LICENSE
-├── include/              # 公共头文件
-├── src/                  # 实现源码
-└── examples/             # 示例工程（随组件一起上传）
+├── include/              # Public headers
+├── src/                  # Implementation
+└── examples/             # Example projects included in the package
 ```
 
-## 引脚默认值
+## Default pins
 
-| 功能 | 默认引脚 |
+| Function | Default configuration |
 | --- | --- |
-| EC11 I2C | SDA=GPIO15，SCL=GPIO16 |
-| RGBW 灯带 | GPIO13，4 颗灯珠 |
-| RAD60 UART | UART1，TX=GPIO17，RX=GPIO18，921600 bit/s |
-| ZXACC-maker I2C | SDA=GPIO41，SCL=GPIO40，地址 `0x73` |
+| EC11 I2C | SDA=GPIO15, SCL=GPIO16 |
+| RGBW LED strip | GPIO13, 4 LEDs |
+| RAD60 UART | UART1, TX=GPIO17, RX=GPIO18, 921600 bit/s |
+| ZXACC-maker I2C | SDA=GPIO41, SCL=GPIO40, address `0x73` |
 
-> 雷达原驱动默认使用 GPIO15/16，与 EC11 的 I2C 冲突，因此根工程控制台把雷达
-> 默认值改为 GPIO17/18。各组件示例中可通过宏或入参覆盖默认引脚。
+> The radar driver's original defaults use GPIO15/16, which conflict with the
+> EC11 I2C bus. The root console project therefore uses GPIO17/18 for the radar.
+> Default pins can be overridden through macros or initialization parameters in
+> the individual component examples.
 
-## 发布到 ESP 组件库
+## Publishing to the ESP Component Registry
 
-`.github/workflows/upload-components.yml` 使用
+`.github/workflows/upload-components.yml` uses
 [`espressif/upload-components-ci-action`](https://github.com/espressif/upload-components-ci-action)
-一次性上传全部 7 个组件到 `LiangXiaoWei123` 命名空间：
+to upload all eight components to the `ryzobeezero` namespace:
 
-1. 需要发布的新版本，先修改对应组件 `idf_component.yml` 中的 `version`（SemVer）。
-2. 提交并推送，然后打一个 semver 格式的标签（如 `v1.0.0`）：
+1. Update `version` in the relevant component's `idf_component.yml` using
+   semantic versioning.
+2. Commit and push the changes, then create and push a semantic-version tag,
+   for example:
 
    ```sh
    git tag v1.0.0
    git push origin v1.0.0
    ```
 
-3. GitHub Actions 触发上传。组件版本取自各自的 `idf_component.yml`，版本已存在于
-   组件库的组件会被自动跳过，因此一个标签可以只发布被改动的组件。
+3. GitHub Actions starts the upload. Each component version is read from its
+   own `idf_component.yml`. Versions already present in the registry are
+   skipped, so a tag can release only the components whose versions changed.
 
-首次发布前，需要在 [components.espressif.com](https://components.espressif.com/)
-完成 namespace（`LiangXiaoWei123`）的注册与登录（GitHub OAuth），并保证 GitHub
-账号对该 namespace 有写权限。
+Before the first release, register and sign in to the `ryzobeezero` namespace
+at [components.espressif.com](https://components.espressif.com/) using GitHub
+OAuth, and ensure that the GitHub account has write access to the namespace.
 
-## 构建与烧录（根联调工程）
+## Build and flash the integration project
 
-加载 ESP-IDF 环境后执行：
+After loading the ESP-IDF environment, run:
 
 ```sh
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-各组件独立使用时可参考其 `examples/` 下的示例工程。
+For standalone usage, see the project under each component's `examples/`
+directory.
 
-## 硬件文档
+## Hardware documentation
 
-- [ZXRoot-Maker-V10 原理图](docs/ZXRoot-Maker-V10.pdf)
-- [ZXACC-Maker-V10 原理图](docs/ZXACC-Maker-V10.pdf)
+- [ZXRoot-Maker-V10 schematic](docs/ZXRoot-Maker-V10.pdf)
+- [ZXACC-Maker-V10 schematic](docs/ZXACC-Maker-V10.pdf)

@@ -8,7 +8,7 @@ cache that the application reads non-blocking.
 
 ```yaml
 dependencies:
-  LiangXiaoWei123/yoke_rad60: "^1.0.0"
+  ryzobeezero/yoke_rad60: "^1.0.0"
 ```
 
 Run `idf.py reconfigure` (or `idf.py build`) to download it.
