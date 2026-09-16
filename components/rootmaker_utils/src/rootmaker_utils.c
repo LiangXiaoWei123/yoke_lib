@@ -26,8 +26,7 @@ typedef struct {
 static rootmaker_used_port_t s_used_ports[ROOTMAKER_MAX_USED_PORTS];
 
 static bool rootmaker_port_equal(rootmaker_port_t *a, const rootmaker_port_t *b) {
-    if (a == NULL || b == NULL || a->pins == NULL || b->pins == NULL ||
-        a->type != b->type || a->pin_num != b->pin_num) {
+    if (a == NULL || b == NULL || a->pins == NULL || b->pins == NULL || a->type != b->type || a->pin_num != b->pin_num) {
         return false;
     }
     for (uint8_t i = 0; i < a->pin_num; i++) {
@@ -85,8 +84,7 @@ esp_err_t rootmaker_get_port_pins(rootmaker_port_t *port, gpio_num_t *pin_a, gpi
     if (port == NULL || pin_a == NULL || pin_b == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (port->pin_num < 2 || port->pins == NULL || port->pins[0] == GPIO_NUM_NC ||
-        port->pins[1] == GPIO_NUM_NC) {
+    if (port->pin_num < 2 || port->pins == NULL || port->pins[0] == GPIO_NUM_NC || port->pins[1] == GPIO_NUM_NC) {
         return ESP_ERR_INVALID_ARG;
     }
     *pin_a = port->pins[0];

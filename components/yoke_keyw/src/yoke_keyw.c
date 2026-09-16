@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_log.h"
 #include "button_gpio.h"
 #include "iot_button.h"
-#include "esp_log.h"
 
 #define TAG "yoke_keyw"
 
@@ -33,14 +33,12 @@ static void yoke_keyw_button_callback(void *button_handle, void *user_data) {
     button_event_t event = iot_button_get_event((button_handle_t)keyw->button_handle);
     bool double_click_enabled = keyw->event_callbacks[BUTTON_DOUBLE_CLICK] != NULL;
 
-    if (event == BUTTON_PRESS_UP && !double_click_enabled &&
-        keyw->event_callbacks[BUTTON_SINGLE_CLICK] != NULL &&
+    if (event == BUTTON_PRESS_UP && !double_click_enabled && keyw->event_callbacks[BUTTON_SINGLE_CLICK] != NULL &&
         iot_button_get_pressed_time((button_handle_t)keyw->button_handle) < keyw->long_press_time_ms) {
         /* Without a double-click subscriber there is no reason to wait for
          * Espressif's multi-click window. Dispatch one single click on every
          * short release, so two quick presses naturally produce two events. */
-        keyw->event_callbacks[BUTTON_SINGLE_CLICK](BUTTON_SINGLE_CLICK,
-                                                   keyw->event_user_data[BUTTON_SINGLE_CLICK]);
+        keyw->event_callbacks[BUTTON_SINGLE_CLICK](BUTTON_SINGLE_CLICK, keyw->event_user_data[BUTTON_SINGLE_CLICK]);
     }
 
     if ((event == BUTTON_SINGLE_CLICK || event == BUTTON_DOUBLE_CLICK) && !double_click_enabled) {
@@ -200,8 +198,7 @@ esp_err_t yoke_keyw_register_event_callback(yoke_keyw_handle_t keyw, button_even
         return ESP_ERR_INVALID_STATE;
     esp_err_t ret = ESP_OK;
     if (event != BUTTON_PRESS_UP && event != BUTTON_SINGLE_CLICK && event != BUTTON_DOUBLE_CLICK) {
-        ret = iot_button_register_cb((button_handle_t)keyw->button_handle, event, NULL,
-                                     yoke_keyw_button_callback, keyw);
+        ret = iot_button_register_cb((button_handle_t)keyw->button_handle, event, NULL, yoke_keyw_button_callback, keyw);
     }
     if (ret == ESP_OK) {
         keyw->event_callbacks[event] = callback;

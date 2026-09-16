@@ -19,7 +19,8 @@ extern "C" {
 /** Opaque driver instance. Created by yoke_motor_init(); NULL on failure. */
 typedef struct yoke_motor *yoke_motor_handle_t;
 
-/** Create and enable the motor on a port (pins[0]=PWMA, pins[1]=PWMB), leaving it coasting. 20 kHz / 10 MHz / group 0 / 50% initial speed. Returns handle, or NULL on failure. */
+/** Create and enable the motor on a port (pins[0]=PWMA, pins[1]=PWMB), leaving it coasting. 20 kHz / 10 MHz / group 0 / 50% initial speed. Returns handle, or
+ * NULL on failure. */
 yoke_motor_handle_t yoke_motor_init(rootmaker_port_t port);
 
 /** Release motor resources after coasting and disabling MCPWM. */

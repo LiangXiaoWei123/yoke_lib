@@ -35,8 +35,9 @@ void app_main(void) {
     ESP_ERROR_CHECK(yoke_keyw_register_event_callback(s_key, BUTTON_SINGLE_CLICK, on_single_click, NULL));
     ESP_ERROR_CHECK(yoke_keyw_register_event_callback(s_key, BUTTON_LONG_PRESS_START, on_long_press_start, NULL));
 
-    ESP_LOGI(TAG, "KEYW ready on RS_PORT1: button=GPIO%d LED=GPIO%d. "
-                  "Single click toggles the LED, long press to log.",
+    ESP_LOGI(TAG,
+             "KEYW ready on RS_PORT1: button=GPIO%d LED=GPIO%d. "
+             "Single click toggles the LED, long press to log.",
              rootmaker_rs_port1.pins[0], rootmaker_rs_port1.pins[1]);
 
     while (1) {

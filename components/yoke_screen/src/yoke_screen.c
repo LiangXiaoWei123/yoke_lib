@@ -18,9 +18,9 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
-#include "rootmaker_utils.h"
-#include "rootmaker_pin.h"
 #include "lcd_panel_st7789_spec.h"
+#include "rootmaker_pin.h"
+#include "rootmaker_utils.h"
 
 #define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 
@@ -417,8 +417,7 @@ lv_display_t* yoke_screen_with_lvgl_init(void) {
 }
 
 esp_err_t yoke_screen_deinit(void) {
-    if (lcd_panel == NULL && lcd_io == NULL && !lcd_spi_initialized &&
-        lvgl_disp == NULL && touch_indev == NULL && touch_i2c_device == NULL &&
+    if (lcd_panel == NULL && lcd_io == NULL && !lcd_spi_initialized && lvgl_disp == NULL && touch_indev == NULL && touch_i2c_device == NULL &&
         !touch_i2c_bus_ref_held) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -426,8 +425,7 @@ esp_err_t yoke_screen_deinit(void) {
 }
 
 void yoke_screen_draw_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data) {
-    if (lcd_panel == NULL || data == NULL || w == 0 || h == 0 || x >= LCD_H_RES || y >= LCD_V_RES ||
-        w > LCD_H_RES - x || h > LCD_V_RES - y) {
+    if (lcd_panel == NULL || data == NULL || w == 0 || h == 0 || x >= LCD_H_RES || y >= LCD_V_RES || w > LCD_H_RES - x || h > LCD_V_RES - y) {
         ESP_LOGE(TAG, "Invalid bitmap: x=%u y=%u w=%u h=%u", x, y, w, h);
         return;
     }

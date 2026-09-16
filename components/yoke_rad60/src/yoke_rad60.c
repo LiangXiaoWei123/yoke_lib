@@ -3,11 +3,11 @@
 
 #include <string.h>
 
-#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
 #include "yoke_rad60_protocol.h"
 
 static const uint8_t RAD60_CMD_GET_RADAR_STATE = 0xD0;

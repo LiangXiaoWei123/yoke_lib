@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bdc_motor.h"
 #include "esp_log.h"
+#include "bdc_motor.h"
 
 #define TAG "yoke_motor"
 

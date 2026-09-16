@@ -7,14 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "driver/gpio.h"
-#include "driver/uart.h"
-#include "esp_heap_caps.h"
-#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "driver/gpio.h"
+#include "driver/uart.h"
 
 #define TAG "UART_Protocol"
 

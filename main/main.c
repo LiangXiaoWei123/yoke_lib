@@ -1,5 +1,5 @@
-#include <stdint.h>
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,8 +8,8 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "driver/uart.h"
 #include "esp_lvgl_port.h"
+#include "driver/uart.h"
 #include "lvgl.h"
 #include "rootmaker_utils.h"
 
@@ -276,8 +276,7 @@ static void keyw_init(void) {
     s_keyw_pressed = false;
     portEXIT_CRITICAL(&s_keyw_mux);
     (void)yoke_keyw_set_led(s_keyw, s_keyw_led_on);
-    ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO%d, LED=GPIO%d",
-             port->name, port->port.pins[0], port->port.pins[1]);
+    ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO%d, LED=GPIO%d", port->name, port->port.pins[0], port->port.pins[1]);
 }
 
 static void keyw_deinit(void) {
@@ -366,14 +365,6 @@ static void ui_refresh_port_selector(void) {
     }
 }
 
-static bool zxacc_maker_is_ready(void) {
-    if (s_zxacc_maker == NULL) {
-        ESP_LOGW(TAG, "ZXACC-maker is not initialized; input p first");
-        return false;
-    }
-    return true;
-}
-
 static void zxacc_maker_init(void) {
     if (s_zxacc_maker != NULL) {
         ESP_LOGW(TAG, "ZXACC-maker is already initialized");
@@ -386,115 +377,6 @@ static void zxacc_maker_init(void) {
         return;
     }
 }
-
-static void zxacc_maker_print_status(void) {
-    if (!zxacc_maker_is_ready())
-        return;
-
-    uint16_t firmware = 0;
-    uint32_t voltage_mv = 0;
-    yoke_zxacc_maker_charge_state_t charge = YOKE_ZXACC_MAKER_CHARGE_UNKNOWN;
-
-    esp_err_t ret = yoke_zxacc_maker_get_firmware_version(s_zxacc_maker, &firmware);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ZXACC-maker firmware read failed: %s", esp_err_to_name(ret));
-        return;
-    }
-    yoke_zxacc_maker_get_battery_voltage(s_zxacc_maker, &voltage_mv);
-    yoke_zxacc_maker_get_charge_state(s_zxacc_maker, &charge);
-
-    const char *charge_str = "unknown";
-    if (charge == YOKE_ZXACC_MAKER_CHARGE_CHARGING)
-        charge_str = "charging";
-    if (charge == YOKE_ZXACC_MAKER_CHARGE_NOT_CHARGING)
-        charge_str = "not charging";
-    if (charge == YOKE_ZXACC_MAKER_CHARGE_COMPLETE)
-        charge_str = "complete";
-    ESP_LOGI(TAG, "ZXACC-maker: firmware=0x%04X charge=%s (0x%02X) voltage=%lu mV (%.3f V)", firmware, charge_str, (unsigned)charge, (unsigned long)voltage_mv,
-             voltage_mv / 1000.0f);
-}
-
-static void zxacc_maker_print_timings(void) {
-    if (!zxacc_maker_is_ready())
-        return;
-
-    uint16_t wakeup_time_ms;
-    uint16_t shutdown_time_ms;
-    esp_err_t ret = yoke_zxacc_maker_get_wakeup_time(s_zxacc_maker, &wakeup_time_ms);
-    if (ret == ESP_OK)
-        ret = yoke_zxacc_maker_get_shutdown_time(s_zxacc_maker, &shutdown_time_ms);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ZXACC-maker timing read failed: %s", esp_err_to_name(ret));
-        return;
-    }
-    ESP_LOGI(TAG, "ZXACC-maker: wakeup hold=%u ms, shutdown hold=%u ms", (unsigned)wakeup_time_ms, (unsigned)shutdown_time_ms);
-}
-
-static void zxacc_maker_set_default_timings(void) {
-    if (!zxacc_maker_is_ready())
-        return;
-
-    esp_err_t ret = yoke_zxacc_maker_set_wakeup_time(s_zxacc_maker, 2000);
-    if (ret == ESP_OK)
-        ret = yoke_zxacc_maker_set_shutdown_time(s_zxacc_maker, 2000);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ZXACC-maker timing write failed: %s", esp_err_to_name(ret));
-        return;
-    }
-    ESP_LOGI(TAG, "ZXACC-maker wakeup and shutdown hold times set to 2000 ms");
-}
-
-static void zxacc_maker_set_timer_wakeup_interactive(void) {
-    if (!zxacc_maker_is_ready())
-        return;
-
-    ESP_LOGW(TAG, "ZXACC-maker timed wake-up: enter seconds (1-4294967295), then press Enter");
-    ESP_LOGW(TAG, "After the value is written, the baseboard immediately enters low-power mode");
-
-    char input[11] = { 0 };
-    size_t length = 0;
-    while (true) {
-        char character;
-        if (scanf("%c", &character) != 1) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-
-        if (character == '\r' || character == '\n') {
-            // Consume the newline sent after the command character before reading the value.
-            if (length == 0)
-                continue;
-            break;
-        }
-        if (character == '\b' || character == 0x7f) {
-            if (length > 0) {
-                --length;
-                printf("\b \b");
-            }
-            continue;
-        }
-        if (character >= '0' && character <= '9' && length < sizeof(input) - 1) {
-            input[length++] = character;
-            putchar(character);
-        }
-    }
-    putchar('\n');
-
-    char *end = NULL;
-    unsigned long long seconds = strtoull(input, &end, 10);
-    if (*input == '\0' || *end != '\0' || seconds == 0 || seconds > UINT32_MAX) {
-        ESP_LOGE(TAG, "Invalid wake-up time: %s", input);
-        return;
-    }
-
-    ESP_LOGW(TAG, "Setting timed wake-up to %llu second(s); entering low-power mode now", seconds);
-    vTaskDelay(pdMS_TO_TICKS(100));
-    esp_err_t ret = yoke_zxacc_maker_set_timer_wakeup(s_zxacc_maker, (uint32_t)seconds);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ZXACC-maker timed wake-up command failed: %s", esp_err_to_name(ret));
-    }
-}
-
 
 /* ============================ Touch UI ============================ */
 
@@ -1462,10 +1344,8 @@ static void ui_refresh_keyw(void) {
 
     lv_label_set_text_fmt(s_keyw_count_label, "%" PRIu32, press_count);
     lv_label_set_text(s_keyw_state_label, s_keyw == NULL ? "Stopped" : (pressed ? "Pressed" : "Ready"));
-    lv_obj_set_style_text_color(s_keyw_state_label,
-                                s_keyw == NULL ? UI_COLOR_SUBTEXT : (pressed ? UI_COLOR_ACCENT : UI_COLOR_SUCCESS), 0);
-    lv_obj_set_style_bg_color(s_keyw_state_dot,
-                              s_keyw == NULL ? UI_COLOR_CARD : (pressed ? UI_COLOR_ACCENT : UI_COLOR_SUCCESS), 0);
+    lv_obj_set_style_text_color(s_keyw_state_label, s_keyw == NULL ? UI_COLOR_SUBTEXT : (pressed ? UI_COLOR_ACCENT : UI_COLOR_SUCCESS), 0);
+    lv_obj_set_style_bg_color(s_keyw_state_dot, s_keyw == NULL ? UI_COLOR_CARD : (pressed ? UI_COLOR_ACCENT : UI_COLOR_SUCCESS), 0);
     lv_label_set_text_fmt(s_keyw_last_event_label, "Last: %s", has_event ? keyw_event_to_string(last_event) : "--");
 }
 
@@ -1729,43 +1609,6 @@ static void ec11_init(void) {
         ESP_LOGI(TAG, "EC11 initialized on %s: SDA=%d SCL=%d", port->name, port->port.pins[0], port->port.pins[1]);
     } else {
         ESP_LOGE(TAG, "EC11 init failed");
-    }
-}
-
-static void ec11_read_key(void) {
-    if (!ec11_is_ready())
-        return;
-
-    yoke_ec11_key_t key;
-    esp_err_t ret = yoke_ec11_read_key(s_ec11, &key);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "EC11 key: pressed=%d press_count=%u", key.pressed, key.press_count);
-    } else {
-        ESP_LOGE(TAG, "EC11 key read failed: %s", esp_err_to_name(ret));
-    }
-}
-
-static void ec11_read_encoder(bool read_diff) {
-    if (!ec11_is_ready())
-        return;
-
-    int16_t value;
-    esp_err_t ret = read_diff ? yoke_ec11_read_encoder_diff(s_ec11, &value) : yoke_ec11_read_encoder_count(s_ec11, &value);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "EC11 %s=%d", read_diff ? "diff" : "count", value);
-    } else {
-        ESP_LOGE(TAG, "EC11 %s read failed: %s", read_diff ? "diff" : "count", esp_err_to_name(ret));
-    }
-}
-
-static void ec11_set_color(uint8_t red, uint8_t green, uint8_t blue) {
-    if (!ec11_is_ready())
-        return;
-
-    const yoke_ec11_rgb_t color = { .red = red, .green = green, .blue = blue };
-    esp_err_t ret = yoke_ec11_set_ws2812_all(s_ec11, color, color);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "EC11 LED set failed: %s", esp_err_to_name(ret));
     }
 }
 

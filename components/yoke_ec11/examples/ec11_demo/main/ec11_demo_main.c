@@ -14,8 +14,7 @@
 static const char *TAG = "ec11_demo";
 
 void app_main(void) {
-    ESP_LOGI(TAG, "initializing EC11 on RS_PORT1: SDA=GPIO%d SCL=GPIO%d, address=0x%02X",
-             rootmaker_rs_port1.pins[0], rootmaker_rs_port1.pins[1],
+    ESP_LOGI(TAG, "initializing EC11 on RS_PORT1: SDA=GPIO%d SCL=GPIO%d, address=0x%02X", rootmaker_rs_port1.pins[0], rootmaker_rs_port1.pins[1],
              YOKE_EC11_DEFAULT_I2C_ADDRESS);
 
     yoke_ec11_handle_t ec11 = yoke_ec11_init(rootmaker_rs_port1);

@@ -28,8 +28,7 @@ void app_main(void) {
         { 0,   0,   0,   0,   "off"   },
     };
 
-    ESP_LOGI(TAG, "strip on RS_PORT1 pin 1 (GPIO%d), %d LEDs",
-             rootmaker_rs_port1.pins[0], RGBW_LED_NUM);
+    ESP_LOGI(TAG, "strip on RS_PORT1 pin 1 (GPIO%d), %d LEDs", rootmaker_rs_port1.pins[0], RGBW_LED_NUM);
     while (1) {
         for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); ++i) {
             ESP_ERROR_CHECK(yoke_rgbw_set_all(colors[i].red, colors[i].green, colors[i].blue, colors[i].white));
