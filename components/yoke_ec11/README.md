@@ -41,12 +41,27 @@ yoke_ec11_rgb_t color = { .red = 0, .green = 255, .blue = 0 };
 yoke_ec11_set_ws2812(ec11, 0, color);
 ```
 
+For a peripheral that uses a non-default address, or for custom bus timing,
+use the complete configuration interface:
+
+```c
+yoke_ec11_config_t config = YOKE_EC11_CONFIG_DEFAULT(rootmaker_rs_port1);
+config.device_address = 0x73;
+config.scl_speed_hz = 400000;
+config.timeout_ms = 500;
+
+yoke_ec11_handle_t ec11 = yoke_ec11_init_with_config(&config);
+ESP_ERROR_CHECK(ec11 != NULL ? ESP_OK : ESP_FAIL);
+```
+
 ## API
 
 See [`include/yoke_ec11.h`](include/yoke_ec11.h) for the full API. Key
 operations:
 
-* `yoke_ec11_init()` / `yoke_ec11_deinit()` — attach/remove the I2C device.
+* `yoke_ec11_init()` — initialize with the default address, speed, and timeout.
+* `yoke_ec11_init_with_config()` — initialize with complete configuration.
+* `yoke_ec11_deinit()` — remove the I2C device.
 * `yoke_ec11_read_encoder_count()` / `yoke_ec11_read_encoder_diff()` — rotary
   encoder position and per-read delta.
 * `yoke_ec11_read_key()` — debounced button state and press counter.

@@ -42,7 +42,7 @@ void yoke_rad60_protocol_init(uint8_t uart_num, int16_t tx_pin, int16_t rx_pin, 
     g_uart_num = uart_num;
     uart_param_config(g_uart_num, &uart_config);
     uart_set_pin(g_uart_num, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    uart_driver_install(g_uart_num, RX_BUF_SIZE, TX_BUF_SIZE, UART_QUEUE_LENGTH, &uart_queue, ESP_INTR_FLAG_IRAM);
+    uart_driver_install(g_uart_num, RX_BUF_SIZE, TX_BUF_SIZE, UART_QUEUE_LENGTH, &uart_queue, 0);
     uart_set_rx_timeout(g_uart_num, 50);
     if (boudrate > 460800) {
         uart_set_rx_full_threshold(g_uart_num, 50);

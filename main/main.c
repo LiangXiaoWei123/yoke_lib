@@ -36,19 +36,15 @@ typedef enum {
 
 typedef struct {
     const char *name;
-    rootmaker_port_t port;
+    const rootmaker_port_t *port;
 } ui_if_port_config_t;
 
-/*
- * Interface map used by global UI port selector. Each entry carries a
- * rootmaker_port_t; pins[0]/pins[1] are SDA/SCL, TX/RX, or PWMA/PWMB.
- */
+/* UI labels for the predefined RootMaker RS ports. */
 static const ui_if_port_config_t s_if_port_configs[UI_IF_PORT_MAX] = {
-    /* Connector order is GND, 3V3, SCL, SDA. pins[0]=SDA, pins[1]=SCL. */
-    { .name = "P1", .port = { ROOTMAKER_PORT_TYPE_RS_BUS, 2, (gpio_num_t[]){ GPIO_NUM_15, GPIO_NUM_16 } } },
-    { .name = "P2", .port = { ROOTMAKER_PORT_TYPE_RS_BUS, 2, (gpio_num_t[]){ GPIO_NUM_19, GPIO_NUM_20 } } },
-    { .name = "P3", .port = { ROOTMAKER_PORT_TYPE_RS_BUS, 2, (gpio_num_t[]){ GPIO_NUM_13, GPIO_NUM_14 } } },
-    { .name = "P4", .port = { ROOTMAKER_PORT_TYPE_RS_BUS, 2, (gpio_num_t[]){ GPIO_NUM_17, GPIO_NUM_18 } } },
+    { .name = "P1", .port = &rootmaker_rs_port1 },
+    { .name = "P2", .port = &rootmaker_rs_port2 },
+    { .name = "P3", .port = &rootmaker_rs_port3 },
+    { .name = "P4", .port = &rootmaker_rs_port4 },
 };
 
 static ui_if_port_t s_ec11_port = UI_IF_PORT_P1;
@@ -119,8 +115,9 @@ static lv_obj_t *s_radar_comm_dot;
 static lv_obj_t *s_radar_comm_label;
 static lv_obj_t *s_radar_detect_dot;
 static lv_obj_t *s_radar_detect_label;
-static lv_obj_t *s_radar_obj_labels[2];
-static lv_obj_t *s_radar_enable_switch;
+static lv_obj_t *s_radar_distance_labels[2];
+static lv_obj_t *s_radar_angle_labels[2];
+static lv_obj_t *s_radar_velocity_labels[2];
 
 /* ZXACC page widgets */
 static lv_obj_t *s_zxacc_version_label;
@@ -199,7 +196,7 @@ static void rgbw_init(void) {
     }
     const ui_if_port_config_t *port = if_port_get_config(s_global_port);
     const uint16_t led_num = 3;
-    esp_err_t ret = yoke_rgbw_init(port->port, led_num);
+    esp_err_t ret = yoke_rgbw_init(*port->port, led_num);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "RGBW init failed: %s", esp_err_to_name(ret));
         return;
@@ -207,7 +204,7 @@ static void rgbw_init(void) {
     s_rgbw_initialized = true;
     s_rgbw_port = s_global_port;
     rgbw_set_all(0, 0, 0, 0);
-    ESP_LOGI(TAG, "RGBW initialized on %s: data=GPIO%d, %u LEDs", port->name, port->port.pins[0], (unsigned)led_num);
+    ESP_LOGI(TAG, "RGBW initialized on %s: data=GPIO%d, %u LEDs", port->name, port->port->pins[0], (unsigned)led_num);
 }
 
 static void rgbw_deinit(void) {
@@ -250,7 +247,7 @@ static void keyw_init(void) {
         return;
     }
     const ui_if_port_config_t *port = if_port_get_config(s_global_port);
-    s_keyw = yoke_keyw_init(port->port);
+    s_keyw = yoke_keyw_init(*port->port);
     if (s_keyw == NULL) {
         ESP_LOGE(TAG, "KEYW init failed");
         return;
@@ -276,7 +273,7 @@ static void keyw_init(void) {
     s_keyw_pressed = false;
     portEXIT_CRITICAL(&s_keyw_mux);
     (void)yoke_keyw_set_led(s_keyw, s_keyw_led_on);
-    ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO%d, LED=GPIO%d", port->name, port->port.pins[0], port->port.pins[1]);
+    ESP_LOGI(TAG, "KEYW initialized on %s: button=GPIO%d, LED=GPIO%d", port->name, port->port->pins[0], port->port->pins[1]);
 }
 
 static void keyw_deinit(void) {
@@ -299,36 +296,32 @@ static void keyw_deinit(void) {
     }
 }
 
-static bool if_port_equals(ui_if_port_t lhs, ui_if_port_t rhs) {
-    return lhs == rhs;
-}
-
 static bool if_port_conflicts_with_keyw(ui_if_port_t port) {
-    return s_keyw != NULL && if_port_equals(s_keyw_port, port);
+    return s_keyw != NULL && s_keyw_port == port;
 }
 
 static bool if_port_is_occupied(ui_if_port_t port, const char **reason) {
-    if (if_port_conflicts_with_keyw(port) && s_keyw != NULL) {
+    if (if_port_conflicts_with_keyw(port)) {
         if (reason)
             *reason = "KEYW";
         return true;
     }
-    if (s_ec11_initialized && if_port_equals(s_ec11_port, port)) {
+    if (s_ec11_initialized && s_ec11_port == port) {
         if (reason)
             *reason = "EC11";
         return true;
     }
-    if (s_radar_initialized && if_port_equals(s_radar_port, port)) {
+    if (s_radar_initialized && s_radar_port == port) {
         if (reason)
             *reason = "Radar";
         return true;
     }
-    if (s_motor != NULL && if_port_equals(s_motor_port, port)) {
+    if (s_motor != NULL && s_motor_port == port) {
         if (reason)
             *reason = "motor";
         return true;
     }
-    if (s_rgbw_initialized && if_port_equals(s_rgbw_port, port)) {
+    if (s_rgbw_initialized && s_rgbw_port == port) {
         if (reason)
             *reason = "RGBW";
         return true;
@@ -347,7 +340,7 @@ static void ui_refresh_port_selector(void) {
         ui_if_port_t port = (ui_if_port_t)i;
         const char *owner = NULL;
         bool occupied = if_port_is_occupied(port, &owner);
-        bool selected = if_port_equals(port, s_global_port);
+        bool selected = port == s_global_port;
 
         if (occupied && !selected) {
             lv_obj_add_state(btn, LV_STATE_DISABLED);
@@ -392,7 +385,6 @@ static void motor_set_speed(uint8_t percent);
 static void radar_init(void);
 static void radar_deinit(void);
 static void radar_read(void);
-static void radar_set_enabled(bool enabled);
 
 static void ui_show_page(ui_page_t page) {
     if (page >= UI_PAGE_MAX)
@@ -437,7 +429,7 @@ static void ui_port_button_click(lv_event_t *event) {
     s_global_port = port;
 
     const ui_if_port_config_t *selected = if_port_get_config(s_global_port);
-    ESP_LOGI(TAG, "Global port selected: %s (%d/%d)", selected->name, selected->port.pins[0], selected->port.pins[1]);
+    ESP_LOGI(TAG, "Global port selected: %s (%d/%d)", selected->name, selected->port->pins[0], selected->port->pins[1]);
 
     ui_refresh_port_selector();
 }
@@ -988,11 +980,6 @@ static void radar_click(lv_event_t *event) {
         radar_read();
 }
 
-static void radar_enable_changed(lv_event_t *event) {
-    lv_obj_t *sw = lv_event_get_target(event);
-    radar_set_enabled(lv_obj_has_state(sw, LV_STATE_CHECKED));
-}
-
 static void ui_page_radar_create(lv_obj_t *parent) {
     ui_title_bar_create(parent, "Radar");
 
@@ -1019,31 +1006,52 @@ static void ui_page_radar_create(lv_obj_t *parent) {
     lv_obj_set_pos(s_radar_detect_label, 120, 72);
 
     for (int i = 0; i < 2; ++i) {
-        s_radar_obj_labels[i] = lv_label_create(parent);
-        lv_label_set_text(s_radar_obj_labels[i], "obj --");
-        lv_obj_set_style_text_color(s_radar_obj_labels[i], UI_COLOR_SUBTEXT, 0);
-        lv_obj_set_pos(s_radar_obj_labels[i], 40, 100 + i * 22);
+        lv_obj_t *card = lv_obj_create(parent);
+        lv_obj_set_size(card, 216, 34);
+        lv_obj_set_pos(card, 12, 96 + i * 40);
+        lv_obj_set_style_bg_color(card, UI_COLOR_CARD, 0);
+        lv_obj_set_style_border_width(card, 1, 0);
+        lv_obj_set_style_border_color(card, UI_COLOR_CARD_ON, 0);
+        lv_obj_set_style_radius(card, 8, 0);
+        lv_obj_set_style_pad_all(card, 0, 0);
+        lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *index_label = lv_label_create(card);
+        lv_label_set_text_fmt(index_label, "#%d", i + 1);
+        lv_obj_set_style_text_color(index_label, UI_COLOR_ACCENT, 0);
+        lv_obj_set_pos(index_label, 8, 8);
+
+        s_radar_distance_labels[i] = lv_label_create(card);
+        lv_obj_set_size(s_radar_distance_labels[i], 64, 18);
+        lv_obj_set_pos(s_radar_distance_labels[i], 34, 8);
+
+        s_radar_angle_labels[i] = lv_label_create(card);
+        lv_obj_set_size(s_radar_angle_labels[i], 52, 18);
+        lv_obj_set_pos(s_radar_angle_labels[i], 98, 8);
+
+        s_radar_velocity_labels[i] = lv_label_create(card);
+        lv_obj_set_size(s_radar_velocity_labels[i], 62, 18);
+        lv_obj_set_pos(s_radar_velocity_labels[i], 150, 8);
+
+        lv_obj_t *fields[] = { s_radar_distance_labels[i], s_radar_angle_labels[i], s_radar_velocity_labels[i] };
+        for (size_t field = 0; field < sizeof(fields) / sizeof(fields[0]); ++field) {
+            lv_label_set_text(fields[field], "--");
+            lv_label_set_long_mode(fields[field], LV_LABEL_LONG_CLIP);
+            lv_obj_set_style_text_align(fields[field], LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_color(fields[field], UI_COLOR_SUBTEXT, 0);
+        }
     }
 
-    lv_obj_t *sw_cap = lv_label_create(parent);
-    lv_label_set_text(sw_cap, "Enable");
-    lv_obj_set_style_text_color(sw_cap, UI_COLOR_TEXT, 0);
-    lv_obj_set_pos(sw_cap, 40, 150);
-
-    s_radar_enable_switch = lv_switch_create(parent);
-    lv_obj_set_pos(s_radar_enable_switch, 120, 146);
-    lv_obj_add_event_cb(s_radar_enable_switch, radar_enable_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
     lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 68, 36);
-    lv_obj_set_pos(init_btn, 12, 184);
+    lv_obj_set_pos(init_btn, 12, 174);
     lv_obj_add_event_cb(init_btn, radar_click, LV_EVENT_CLICKED, (void *)0);
 
     lv_obj_t *read_btn = ui_make_button(parent, "Read", UI_COLOR_CARD, 68, 36);
-    lv_obj_set_pos(read_btn, 86, 184);
+    lv_obj_set_pos(read_btn, 86, 174);
     lv_obj_add_event_cb(read_btn, radar_click, LV_EVENT_CLICKED, (void *)2);
 
     lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 68, 36);
-    lv_obj_set_pos(deinit_btn, 160, 184);
+    lv_obj_set_pos(deinit_btn, 160, 174);
     lv_obj_add_event_cb(deinit_btn, radar_click, LV_EVENT_CLICKED, (void *)1);
 }
 
@@ -1053,8 +1061,11 @@ static void ui_refresh_radar(void) {
         lv_obj_set_style_bg_color(s_radar_detect_dot, UI_COLOR_CARD, 0);
         lv_label_set_text(s_radar_comm_label, "not ready");
         lv_label_set_text(s_radar_detect_label, "--");
-        lv_label_set_text(s_radar_obj_labels[0], "obj --");
-        lv_label_set_text(s_radar_obj_labels[1], "obj --");
+        for (int i = 0; i < 2; ++i) {
+            lv_label_set_text(s_radar_distance_labels[i], "--");
+            lv_label_set_text(s_radar_angle_labels[i], "--");
+            lv_label_set_text(s_radar_velocity_labels[i], "--");
+        }
         return;
     }
 
@@ -1073,10 +1084,19 @@ static void ui_refresh_radar(void) {
     for (int i = 0; i < 2; ++i) {
         if (i < object_count) {
             const multitarget_obj_info_t *obj = &data.radar_info.obj[i];
-            lv_label_set_text_fmt(s_radar_obj_labels[i], "obj%d  %3u cm  %3d deg  %3d cm/s", i + 1, (unsigned)obj->range_val, (int)obj->angle_val,
-                                  (int)obj->velo_val);
+            lv_label_set_text_fmt(s_radar_distance_labels[i], "%ucm", (unsigned)obj->range_val);
+            lv_label_set_text_fmt(s_radar_angle_labels[i], "%ddeg", (int)obj->angle_val);
+            lv_label_set_text_fmt(s_radar_velocity_labels[i], "%dcm/s", (int)obj->velo_val);
+            lv_obj_set_style_text_color(s_radar_distance_labels[i], UI_COLOR_TEXT, 0);
+            lv_obj_set_style_text_color(s_radar_angle_labels[i], UI_COLOR_TEXT, 0);
+            lv_obj_set_style_text_color(s_radar_velocity_labels[i], UI_COLOR_TEXT, 0);
         } else {
-            lv_label_set_text(s_radar_obj_labels[i], "obj --");
+            lv_label_set_text(s_radar_distance_labels[i], "--");
+            lv_label_set_text(s_radar_angle_labels[i], "--");
+            lv_label_set_text(s_radar_velocity_labels[i], "--");
+            lv_obj_set_style_text_color(s_radar_distance_labels[i], UI_COLOR_SUBTEXT, 0);
+            lv_obj_set_style_text_color(s_radar_angle_labels[i], UI_COLOR_SUBTEXT, 0);
+            lv_obj_set_style_text_color(s_radar_velocity_labels[i], UI_COLOR_SUBTEXT, 0);
         }
     }
 }
@@ -1533,10 +1553,10 @@ static void motor_init(void) {
         return;
     }
 
-    s_motor = yoke_motor_init(port->port);
+    s_motor = yoke_motor_init(*port->port);
     if (s_motor != NULL) {
         s_motor_port = s_global_port;
-        ESP_LOGI(TAG, "motor initialized on %s: PWMA=%d PWMB=%d, speed=50%%, coast", port->name, port->port.pins[0], port->port.pins[1]);
+        ESP_LOGI(TAG, "motor initialized on %s: PWMA=%d PWMB=%d, speed=50%%, coast", port->name, port->port->pins[0], port->port->pins[1]);
         return;
     }
 
@@ -1602,11 +1622,11 @@ static void ec11_init(void) {
         return;
     }
 
-    s_ec11 = yoke_ec11_init(port->port);
+    s_ec11 = yoke_ec11_init(*port->port);
     if (s_ec11 != NULL) {
         s_ec11_initialized = true;
         s_ec11_port = s_global_port;
-        ESP_LOGI(TAG, "EC11 initialized on %s: SDA=%d SCL=%d", port->name, port->port.pins[0], port->port.pins[1]);
+        ESP_LOGI(TAG, "EC11 initialized on %s: SDA=%d SCL=%d", port->name, port->port->pins[0], port->port->pins[1]);
     } else {
         ESP_LOGE(TAG, "EC11 init failed");
     }
@@ -1639,11 +1659,11 @@ static void radar_init(void) {
         return;
     }
 
-    esp_err_t ret = yoke_rad60_init(port->port);
+    esp_err_t ret = yoke_rad60_init(*port->port);
     if (ret == ESP_OK) {
         s_radar_initialized = true;
         s_radar_port = s_global_port;
-        ESP_LOGI(TAG, "RAD60 initialized on %s: UART%d TX=%d RX=%d baud=%lu", port->name, RADAR_UART_NUM, port->port.pins[0], port->port.pins[1],
+        ESP_LOGI(TAG, "RAD60 initialized on %s: UART%d TX=%d RX=%d baud=%lu", port->name, RADAR_UART_NUM, port->port->pins[0], port->port->pins[1],
                  (unsigned long)RADAR_BAUDRATE);
     } else {
         ESP_LOGE(TAG, "RAD60 init failed: %s", esp_err_to_name(ret));
@@ -1670,17 +1690,6 @@ static void radar_read(void) {
         ESP_LOGI(TAG, "  object[%u]: distance=%u cm angle=%d deg velocity=%d cm/s id=%u", index, object->range_val, object->angle_val, object->velo_val,
                  object->objid);
     }
-}
-
-static void radar_set_enabled(bool enabled) {
-    if (!s_radar_initialized) {
-        ESP_LOGW(TAG, "RAD60 is not initialized; input i first");
-        return;
-    }
-
-    /* The current RAD60 API exposes reads only; keep the control visible but
-     * avoid calling a removed driver symbol. */
-    ESP_LOGW(TAG, "RAD60 detection control is not supported by the current driver (requested: %s)", enabled ? "enabled" : "disabled");
 }
 
 static void radar_deinit(void) {

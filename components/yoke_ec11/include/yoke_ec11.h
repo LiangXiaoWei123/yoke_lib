@@ -21,6 +21,20 @@ extern "C" {
 #define YOKE_EC11_DEFAULT_I2C_SPEED_HZ 100000U
 #define YOKE_EC11_DEFAULT_TIMEOUT_MS 1000U
 
+/** Default configuration initializer for a RootMaker port. */
+#define YOKE_EC11_CONFIG_DEFAULT(port_)                                                                                   \
+    {                                                                                                                     \
+        .port = (port_), .device_address = YOKE_EC11_DEFAULT_I2C_ADDRESS, .scl_speed_hz = YOKE_EC11_DEFAULT_I2C_SPEED_HZ, \
+        .timeout_ms = YOKE_EC11_DEFAULT_TIMEOUT_MS                                                                        \
+    }
+/** Complete initialization configuration. */
+typedef struct {
+    rootmaker_port_t port;  /**< I2C port; pins[0]=SDA, pins[1]=SCL. */
+    uint8_t device_address; /**< Active 7-bit I2C address. */
+    uint32_t scl_speed_hz;  /**< I2C clock frequency for this device. */
+    uint32_t timeout_ms;    /**< I2C transaction timeout in milliseconds. */
+} yoke_ec11_config_t;
+
 /** RGB brightness values for one WS2812 LED. */
 typedef struct {
     uint8_t red;   /**< Red brightness, from 0 to 255. */
@@ -40,14 +54,25 @@ typedef struct yoke_ec11 *yoke_ec11_handle_t;
 /**
  * Attach one Yoke-EC11-V10 to a port. The I2C master bus is created or reused
  * through rootmaker_utils using the port's first two pins (SDA/SCL); the I2C
- * peripheral is resolved automatically (I2C0 first, then I2C1). The slave
- * address defaults to 0x70 and can be changed with
- * yoke_ec11_set_active_address().
+ * peripheral is resolved automatically (I2C0 first, then I2C1). This shortcut
+ * uses the default address, speed, and timeout; use
+ * yoke_ec11_init_with_config() to override them.
  *
  * @param port Port descriptor (pins[0]=SDA, pins[1]=SCL).
  * @return Driver handle, or NULL on failure (the error is logged).
  */
 yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port);
+
+/**
+ * Attach one Yoke-EC11-V10 using a complete configuration.
+ *
+ * Use this interface when the peripheral no longer uses the default address,
+ * or when a different I2C speed or transaction timeout is required.
+ *
+ * @param config Initialization configuration. Its contents are copied.
+ * @return Driver handle, or NULL if the configuration is invalid or initialization fails.
+ */
+yoke_ec11_handle_t yoke_ec11_init_with_config(yoke_ec11_config_t *config);
 
 /** Remove only this device from the I2C bus; the bus remains available to other devices. */
 esp_err_t yoke_ec11_deinit(yoke_ec11_handle_t yoke);

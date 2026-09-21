@@ -1,6 +1,7 @@
 /** @file yoke_ec11.c */
 #include "yoke_ec11.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -28,7 +29,6 @@ struct yoke_ec11 {
     uint32_t scl_speed_hz;
     uint32_t timeout_ms;
     bool bus_ref_held;
-    bool port_claimed;
     bool initialized;
 };
 
@@ -82,37 +82,43 @@ static esp_err_t yoke_add_device(yoke_ec11_handle_t yoke, uint8_t address) {
     return ret;
 }
 
-yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
+static bool yoke_config_is_valid(yoke_ec11_config_t *config) {
+    if (config == NULL || !yoke_is_address_valid(config->device_address) || config->scl_speed_hz == 0U || config->timeout_ms == 0U ||
+        config->timeout_ms > INT_MAX) {
+        return false;
+    }
+    gpio_num_t sda;
+    gpio_num_t scl;
+    return rootmaker_get_port_pins(&config->port, &sda, &scl) == ESP_OK && sda != scl;
+}
+
+yoke_ec11_handle_t yoke_ec11_init_with_config(yoke_ec11_config_t *config) {
+    if (!yoke_config_is_valid(config)) {
+        ESP_LOGE(TAG, "invalid configuration");
+        return NULL;
+    }
+
     yoke_ec11_handle_t yoke = calloc(1, sizeof(struct yoke_ec11));
     if (yoke == NULL) {
         ESP_LOGE(TAG, "no mem");
         return NULL;
     }
-    yoke->port = port;
-    yoke->device_address = YOKE_EC11_DEFAULT_I2C_ADDRESS;
-    yoke->scl_speed_hz = YOKE_EC11_DEFAULT_I2C_SPEED_HZ;
-    yoke->timeout_ms = YOKE_EC11_DEFAULT_TIMEOUT_MS;
+    yoke->port = config->port;
+    yoke->device_address = config->device_address;
+    yoke->scl_speed_hz = config->scl_speed_hz;
+    yoke->timeout_ms = config->timeout_ms;
 
-    esp_err_t ret = rootmaker_use_port(&port);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "port in use: %s", esp_err_to_name(ret));
-        free(yoke);
-        return NULL;
-    }
-    yoke->port_claimed = true;
-    ret = rootmaker_new_i2c_bus(&port, &yoke->bus_handle);
+    esp_err_t ret = rootmaker_new_i2c_bus(&yoke->port, &yoke->bus_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "new i2c bus failed: %s", esp_err_to_name(ret));
-        (void)rootmaker_release_port(&port);
         free(yoke);
         return NULL;
     }
     yoke->bus_ref_held = true;
-    ret = yoke_add_device(yoke, YOKE_EC11_DEFAULT_I2C_ADDRESS);
+    ret = yoke_add_device(yoke, config->device_address);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "add device failed: %s", esp_err_to_name(ret));
-        (void)rootmaker_del_i2c_bus(&port);
-        (void)rootmaker_release_port(&port);
+        (void)rootmaker_del_i2c_bus(&yoke->port);
         free(yoke);
         return NULL;
     }
@@ -124,7 +130,7 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
         ESP_LOGE(TAG,
                  "device ID read failed: address=0x%02X SDA=GPIO%d SCL=GPIO%d: %s (0x%x). "
                  "Check module power, common GND, SDA/SCL order and pull-ups",
-                 yoke->device_address, port.pins[0], port.pins[1], esp_err_to_name(ret), ret);
+                 yoke->device_address, yoke->port.pins[0], yoke->port.pins[1], esp_err_to_name(ret), ret);
         (void)yoke_ec11_deinit(yoke);
         return NULL;
     }
@@ -136,8 +142,13 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
     return yoke;
 }
 
+yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
+    yoke_ec11_config_t config = YOKE_EC11_CONFIG_DEFAULT(port);
+    return yoke_ec11_init_with_config(&config);
+}
+
 esp_err_t yoke_ec11_deinit(yoke_ec11_handle_t yoke) {
-    if (yoke == NULL || (!yoke->initialized && !yoke->bus_ref_held && !yoke->port_claimed)) {
+    if (yoke == NULL || (!yoke->initialized && !yoke->bus_ref_held)) {
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t first_error = ESP_OK;
@@ -157,11 +168,7 @@ esp_err_t yoke_ec11_deinit(yoke_ec11_handle_t yoke) {
             first_error = ret;
         }
     }
-    if (yoke->port_claimed && !yoke->bus_ref_held) {
-        (void)rootmaker_release_port(&yoke->port);
-        yoke->port_claimed = false;
-    }
-    if (!yoke->bus_ref_held && !yoke->port_claimed) {
+    if (!yoke->bus_ref_held) {
         free(yoke);
     }
     return first_error;

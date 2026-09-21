@@ -70,9 +70,9 @@ esp_err_t rootmaker_get_port_pins(rootmaker_port_t *port, gpio_num_t *pin_a, gpi
 esp_err_t rootmaker_get_port_pin(rootmaker_port_t *port, uint8_t index, gpio_num_t *pin);
 
 /**
- * Claim a port so a second device cannot use it at the same time. Ports are
- * matched by content (type + pins), so a copy of the same physical port is
- * treated as the same port.
+ * Claim all GPIOs in a port for exclusive use. The claim fails if any GPIO
+ * overlaps another exclusive port or an active shared I2C bus. I2C drivers
+ * must use rootmaker_new_i2c_bus() instead so SDA/SCL can be shared.
  *
  * @param port Port to claim.
  * @return ESP_OK, ESP_ERR_INVALID_STATE if already claimed, ESP_ERR_NO_MEM if the table is full.
@@ -82,15 +82,20 @@ esp_err_t rootmaker_use_port(rootmaker_port_t *port);
 /** Release a previously claimed port. ESP_ERR_NOT_FOUND if it was not claimed. */
 esp_err_t rootmaker_release_port(rootmaker_port_t *port);
 
-/** Return true when the port is currently claimed. */
+/** Return true when any GPIO in the port is used exclusively or by a shared I2C bus. */
 bool rootmaker_port_is_used(rootmaker_port_t *port);
 
 /**
  * Get or create an I2C master bus for a port.
  *
+ * The first two pins (SDA/SCL) are acquired for shared I2C use. Acquisition
+ * fails if either GPIO is held by an exclusive rootmaker_use_port() claim.
+ * Multiple calls with the same SDA/SCL share the bus by reference count.
+ *
  * The I2C peripheral is resolved automatically: the first free peripheral is
  * tried in order (I2C0 first, then I2C1). Sharing rules per peripheral:
- * - unused            -> the bus is created there.
+ * - unused            -> creation is attempted there; externally occupied
+ *                        peripherals are skipped.
  * - used with same pins -> the existing handle is returned and its reference
  *   count is incremented.
  * - used with other pins -> the next peripheral is tried.
