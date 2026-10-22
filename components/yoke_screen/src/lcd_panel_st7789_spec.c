@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2021-2024 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Modified for RootMaker: RootMaker panel and touch setup, vendor initialization, shared I2C and exclusive GPIO lifecycle.
  */
 
 #include <stdlib.h>

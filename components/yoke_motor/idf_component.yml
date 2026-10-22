@@ -1,10 +1,10 @@
 version: "1.0.0"
-description: Yoke-motor brushed DC motor driver (MCPWM) for RootMaker boards
+description: Yoke-motor brushed DC motor driver (MCPWM) for the RootMaker development board
 url: "https://github.com/LiangXiaoWei123/yoke_lib"
 repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
 repository_info:
   path: "components/yoke_motor"
-license: "MIT"
+license: "MIT AND Apache-2.0"
 maintainers:
   - "LiangXiaoWei123"
 issues: "https://github.com/LiangXiaoWei123/yoke_lib/issues"

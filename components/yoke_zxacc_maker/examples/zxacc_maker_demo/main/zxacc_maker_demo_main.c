@@ -26,7 +26,7 @@ static const char *charge_to_string(yoke_zxacc_maker_charge_state_t state) {
 }
 
 void app_main(void) {
-    yoke_zxacc_maker_handle_t board = yoke_zxacc_maker_init();
+    yoke_zxacc_maker_handle_t board = yoke_zxacc_maker_init(rootmaker_sys_i2c_port);
     if (board == NULL) {
         ESP_LOGE(TAG, "ZXACC-maker initialization failed");
         return;

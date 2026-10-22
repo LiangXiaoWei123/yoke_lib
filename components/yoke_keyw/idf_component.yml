@@ -1,5 +1,5 @@
 version: "1.0.0"
-description: Yoke-KEYW button and GPIO indicator LED driver for RootMaker boards
+description: Yoke-KEYW button and GPIO indicator LED driver for the RootMaker development board
 url: "https://github.com/LiangXiaoWei123/yoke_lib"
 repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
 repository_info:

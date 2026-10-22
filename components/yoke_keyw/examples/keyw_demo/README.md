@@ -8,7 +8,7 @@ then uses single click to toggle the LED and long press to log.
 | Item | Default |
 | --- | --- |
 | Expansion port | RS_PORT1 |
-| Button | PORT1_PIN1 (GPIO15, active low) |
+| Button | PORT1_PIN1 (GPIO15, active high) |
 | LED | PORT1_PIN2 (GPIO16) |
 
 Change `rootmaker_rs_port1` in `main/keyw_demo_main.c` to select a different

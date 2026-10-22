@@ -123,7 +123,7 @@ static void create_touch_demo(void) {
 }
 
 void app_main(void) {
-    lv_display_t *display = yoke_screen_with_lvgl_init();
+    lv_display_t *display = yoke_screen_with_lvgl_init(rootmaker_sys_i2c_port);
     if (display == NULL) {
         ESP_LOGE(TAG, "screen or touch initialization failed");
         return;

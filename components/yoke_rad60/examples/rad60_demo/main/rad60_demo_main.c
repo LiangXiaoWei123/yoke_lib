@@ -14,12 +14,17 @@
 static const char *TAG = "rad60_demo";
 
 void app_main(void) {
-    ESP_ERROR_CHECK(yoke_rad60_init(rootmaker_rs_port1));
-    ESP_LOGI(TAG, "RAD60 initialized on RS_PORT1: TX=GPIO%d RX=GPIO%d", rootmaker_rs_port1.pins[0], rootmaker_rs_port1.pins[1]);
+    yoke_rad60_handle_t radar = yoke_rad60_init(rootmaker_rs_port1, YOKE_RAD60_DEFAULT_UART_NUM);
+    if (radar == NULL) {
+        ESP_LOGE(TAG, "radar initialization failed");
+        return;
+    }
+    ESP_LOGI(TAG, "RAD60 initialized on UART%d RS_PORT1: TX=GPIO%d RX=GPIO%d", YOKE_RAD60_DEFAULT_UART_NUM, rootmaker_rs_port1.pins[0],
+             rootmaker_rs_port1.pins[1]);
 
     while (1) {
         yoke_rad60_radar_data_t data = { 0 };
-        esp_err_t ret = yoke_rad60_get_radar_data(&data);
+        esp_err_t ret = yoke_rad60_get_radar_data(radar, &data);
         if (ret == ESP_ERR_NOT_SUPPORTED && !data.is_comm_ok) {
             ESP_LOGE(TAG, "radar communication timeout: no valid UART frame; ");
         } else if (ret == ESP_ERR_TIMEOUT) {

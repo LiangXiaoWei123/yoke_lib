@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2021-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Modified for RootMaker: RootMaker panel and touch setup, vendor initialization, shared I2C and exclusive GPIO lifecycle.
  */
 #pragma once
 
@@ -13,9 +15,7 @@
 extern "C" {
 #endif
 
-/**
- * @brief LCD panel initialization command
- */
+/** @brief LCD panel initialization command */
 typedef struct {
     int cmd;               /*!< LCD command */
     const void *data;      /*!< Buffer that holds the command specific data */

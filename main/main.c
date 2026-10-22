@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "driver/uart.h"
@@ -22,6 +23,13 @@
 #include "yoke_zxacc_maker.h"
 
 const char *TAG = "main";
+
+static void log_ui_memory(const char *stage) {
+    ESP_LOGI(TAG, "%s: heap free=%zu, largest=%zu; internal free=%zu, largest=%zu bytes", stage,
+             heap_caps_get_free_size(MALLOC_CAP_8BIT), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+}
 
 #define RADAR_UART_NUM UART_NUM_1
 #define RADAR_BAUDRATE 921600U
@@ -48,9 +56,12 @@ static const ui_if_port_config_t s_if_port_configs[UI_IF_PORT_MAX] = {
 };
 
 static ui_if_port_t s_ec11_port = UI_IF_PORT_P1;
-static ui_if_port_t s_radar_port = UI_IF_PORT_P2;
+static ui_if_port_t s_radar_port = UI_IF_PORT_P1;
 static ui_if_port_t s_motor_port = UI_IF_PORT_P4;
 static ui_if_port_t s_rgbw_port = UI_IF_PORT_P1;
+static yoke_rgbw_handle_t s_rgbw;
+/* Keep the selected color across Stop/Start and reapply it when starting. */
+static uint8_t s_rgbw_r, s_rgbw_g, s_rgbw_b, s_rgbw_w;
 static ui_if_port_t s_keyw_port = UI_IF_PORT_P4;
 
 // A selected interface is reserved by its active module until it is deinitialized.
@@ -61,6 +72,7 @@ static bool s_radar_initialized;
 static bool s_ec11_initialized;
 static bool s_rgbw_initialized;
 static yoke_ec11_handle_t s_ec11;
+static yoke_rad60_handle_t s_radar;
 static bool s_ec11_key_prev;
 static int s_ec11_rot_acc;
 static yoke_motor_handle_t s_motor;
@@ -178,9 +190,9 @@ static void rgbw_set_all(uint8_t red, uint8_t green, uint8_t blue, uint8_t white
         ESP_LOGW(TAG, "RGBW is not initialized; input L or tap Start first");
         return;
     }
-    esp_err_t ret = yoke_rgbw_set_all(red, green, blue, white);
+    esp_err_t ret = yoke_rgbw_set_all(s_rgbw, red, green, blue, white);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "RGBW 设置失败: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "RGBW update failed: %s", esp_err_to_name(ret));
     }
 }
 
@@ -196,15 +208,16 @@ static void rgbw_init(void) {
     }
     const ui_if_port_config_t *port = if_port_get_config(s_global_port);
     const uint16_t led_num = 3;
-    esp_err_t ret = yoke_rgbw_init(*port->port, led_num);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "RGBW init failed: %s", esp_err_to_name(ret));
+    s_rgbw = yoke_rgbw_init(*port->port, led_num);
+    if (s_rgbw == NULL) {
+        ESP_LOGE(TAG, "RGBW init failed");
         return;
     }
     s_rgbw_initialized = true;
     s_rgbw_port = s_global_port;
-    rgbw_set_all(0, 0, 0, 0);
+    rgbw_set_all(s_rgbw_r, s_rgbw_g, s_rgbw_b, s_rgbw_w);
     ESP_LOGI(TAG, "RGBW initialized on %s: data=GPIO%d, %u LEDs", port->name, port->port->pins[0], (unsigned)led_num);
+    log_ui_memory("After RGBW init");
 }
 
 static void rgbw_deinit(void) {
@@ -212,13 +225,15 @@ static void rgbw_deinit(void) {
         ESP_LOGW(TAG, "RGBW not initialized");
         return;
     }
-    esp_err_t ret = yoke_rgbw_deinit();
+    esp_err_t ret = yoke_rgbw_deinit(s_rgbw);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "RGBW deinit failed: %s", esp_err_to_name(ret));
         return;
     }
+    s_rgbw = NULL;
     s_rgbw_initialized = false;
     ESP_LOGI(TAG, "RGBW deinitialized");
+    log_ui_memory("After RGBW deinit");
 }
 
 static void keyw_event_callback(button_event_t event, void *user_data) {
@@ -284,7 +299,8 @@ static void keyw_deinit(void) {
     esp_err_t ret = yoke_keyw_deinit(s_keyw);
     /* The driver releases the instance even if button cleanup reports an
      * error, so the handle must never be retained here. */
-    s_keyw = NULL;
+    if (ret == ESP_OK)
+        s_keyw = NULL;
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "KEYW deinit failed: %s", esp_err_to_name(ret));
     }
@@ -364,7 +380,7 @@ static void zxacc_maker_init(void) {
         return;
     }
 
-    s_zxacc_maker = yoke_zxacc_maker_init();
+    s_zxacc_maker = yoke_zxacc_maker_init(rootmaker_sys_i2c_port);
     if (s_zxacc_maker == NULL) {
         ESP_LOGE(TAG, "ZXACC-maker I2C init failed");
         return;
@@ -384,7 +400,6 @@ static void motor_stop(bool brake);
 static void motor_set_speed(uint8_t percent);
 static void radar_init(void);
 static void radar_deinit(void);
-static void radar_read(void);
 
 static void ui_show_page(ui_page_t page) {
     if (page >= UI_PAGE_MAX)
@@ -392,16 +407,16 @@ static void ui_show_page(ui_page_t page) {
     s_current_page = page;
     for (ui_page_t i = 0; i < UI_PAGE_MAX; ++i) {
         if (i == page) {
-            lv_obj_remove_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(s_pages[i], false);
         } else {
-            lv_obj_add_flag(s_pages[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(s_pages[i], true);
         }
     }
     if (s_status_label != NULL) {
         if (page == UI_PAGE_DASHBOARD) {
-            lv_obj_remove_flag(s_status_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(s_status_label, false);
         } else {
-            lv_obj_add_flag(s_status_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(s_status_label, true);
         }
     }
 }
@@ -442,7 +457,7 @@ static lv_obj_t *ui_page_container_create(lv_obj_t *screen) {
     lv_obj_set_style_border_width(cont, 0, 0);
     lv_obj_set_style_pad_all(cont, 0, 0);
     lv_obj_set_scrollbar_mode(cont, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(cont, false);
     lv_obj_add_event_cb(cont, ui_page_gesture, LV_EVENT_GESTURE, NULL);
     return cont;
 }
@@ -755,7 +770,7 @@ static void ui_refresh_ec11(void) {
     }
 }
 
-/* EC11 联动：初始化后旋转编码器控制仪表盘轮盘，按键进入/返回 */
+/* EC11 navigation: rotate the encoder to move the dashboard wheel; press to enter or return. */
 static void ec11_ui_control(void) {
     if (!s_ec11_initialized)
         return;
@@ -774,7 +789,7 @@ static void ec11_ui_control(void) {
 
     int16_t diff = 0;
     if (yoke_ec11_read_encoder_diff(s_ec11, &diff) == ESP_OK && s_current_page == UI_PAGE_DASHBOARD) {
-        /* 外设每个机械棘爪返回 2，累加后每满 2 移动一格，避免咔哒一次跳 2 */
+        /* Each physical detent reports 2 counts; accumulate two counts per wheel step. */
         s_ec11_rot_acc += diff;
         int steps = s_ec11_rot_acc / 2;
         if (steps != 0) {
@@ -791,7 +806,6 @@ static void ec11_ui_control(void) {
 
 /* -------------------- RGBW page -------------------- */
 
-static uint8_t s_rgbw_r, s_rgbw_g, s_rgbw_b, s_rgbw_w;
 static lv_obj_t *s_rgbw_sliders[4];
 static lv_obj_t *s_rgbw_preview;
 static lv_obj_t *s_rgbw_state_label;
@@ -800,6 +814,12 @@ static lv_obj_t *s_rgbw_start_button;
 static lv_obj_t *s_rgbw_stop_button;
 
 static void ui_refresh_rgbw(void) {
+    static bool refreshed;
+    static bool previous_initialized;
+    /* These controls only change when the driver starts or stops. */
+    if (refreshed && previous_initialized == s_rgbw_initialized)
+        return;
+
     for (int i = 0; i < 4; ++i) {
         if (s_rgbw_sliders[i] != NULL) {
             if (s_rgbw_initialized) {
@@ -833,6 +853,8 @@ static void ui_refresh_rgbw(void) {
         lv_label_set_text(s_rgbw_state_label, s_rgbw_initialized ? "Ready" : "Not initialized");
         lv_obj_set_style_text_color(s_rgbw_state_label, s_rgbw_initialized ? UI_COLOR_SUCCESS : UI_COLOR_WARNING, 0);
     }
+    previous_initialized = s_rgbw_initialized;
+    refreshed = true;
 }
 
 static void rgbw_apply(void) {
@@ -976,8 +998,6 @@ static void radar_click(lv_event_t *event) {
         radar_init();
     if (action == 1)
         radar_deinit();
-    if (action == 2)
-        radar_read();
 }
 
 static void ui_page_radar_create(lv_obj_t *parent) {
@@ -1014,7 +1034,7 @@ static void ui_page_radar_create(lv_obj_t *parent) {
         lv_obj_set_style_border_color(card, UI_COLOR_CARD_ON, 0);
         lv_obj_set_style_radius(card, 8, 0);
         lv_obj_set_style_pad_all(card, 0, 0);
-        lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollable(card, false);
 
         lv_obj_t *index_label = lv_label_create(card);
         lv_label_set_text_fmt(index_label, "#%d", i + 1);
@@ -1042,16 +1062,12 @@ static void ui_page_radar_create(lv_obj_t *parent) {
         }
     }
 
-    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 68, 36);
-    lv_obj_set_pos(init_btn, 12, 174);
+    lv_obj_t *init_btn = ui_make_button(parent, "Init", UI_COLOR_ACCENT, 100, 36);
+    lv_obj_set_pos(init_btn, 16, 174);
     lv_obj_add_event_cb(init_btn, radar_click, LV_EVENT_CLICKED, (void *)0);
 
-    lv_obj_t *read_btn = ui_make_button(parent, "Read", UI_COLOR_CARD, 68, 36);
-    lv_obj_set_pos(read_btn, 86, 174);
-    lv_obj_add_event_cb(read_btn, radar_click, LV_EVENT_CLICKED, (void *)2);
-
-    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 68, 36);
-    lv_obj_set_pos(deinit_btn, 160, 174);
+    lv_obj_t *deinit_btn = ui_make_button(parent, "Deinit", UI_COLOR_DANGER, 100, 36);
+    lv_obj_set_pos(deinit_btn, 124, 174);
     lv_obj_add_event_cb(deinit_btn, radar_click, LV_EVENT_CLICKED, (void *)1);
 }
 
@@ -1070,7 +1086,8 @@ static void ui_refresh_radar(void) {
     }
 
     yoke_rad60_radar_data_t data;
-    if (yoke_rad60_get_radar_data(&data) != ESP_OK) {
+    esp_err_t ret = yoke_rad60_get_radar_data(s_radar, &data);
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_SUPPORTED) {
         return;
     }
 
@@ -1407,7 +1424,7 @@ static void ui_page_keyw_create(lv_obj_t *parent) {
     lv_obj_set_style_radius(summary, 14, 0);
     lv_obj_set_style_border_width(summary, 0, 0);
     lv_obj_set_style_pad_all(summary, 0, 0);
-    lv_obj_remove_flag(summary, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(summary, false);
 
     lv_obj_t *count_cap = lv_label_create(summary);
     lv_label_set_text(count_cap, "PRESS COUNT");
@@ -1459,7 +1476,7 @@ static void ui_page_keyw_create(lv_obj_t *parent) {
 static void ui_timer_100ms(lv_timer_t *timer) {
     (void)timer;
     if (s_current_page == UI_PAGE_EC11) {
-        /* 先刷新显示（消费 diff 用于展示），再跑联动控制，保证按键可退出 */
+        /* Refresh first to consume the displayed delta, then process navigation so the button can exit. */
         ui_refresh_ec11();
     }
     ec11_ui_control();
@@ -1659,36 +1676,14 @@ static void radar_init(void) {
         return;
     }
 
-    esp_err_t ret = yoke_rad60_init(*port->port);
-    if (ret == ESP_OK) {
+    s_radar = yoke_rad60_init(*port->port, YOKE_RAD60_DEFAULT_UART_NUM);
+    if (s_radar != NULL) {
         s_radar_initialized = true;
         s_radar_port = s_global_port;
         ESP_LOGI(TAG, "RAD60 initialized on %s: UART%d TX=%d RX=%d baud=%lu", port->name, RADAR_UART_NUM, port->port->pins[0], port->port->pins[1],
                  (unsigned long)RADAR_BAUDRATE);
     } else {
-        ESP_LOGE(TAG, "RAD60 init failed: %s", esp_err_to_name(ret));
-    }
-}
-
-static void radar_read(void) {
-    if (!s_radar_initialized) {
-        ESP_LOGW(TAG, "RAD60 is not initialized; input i first");
-        return;
-    }
-
-    yoke_rad60_radar_data_t data;
-    esp_err_t ret = yoke_rad60_get_radar_data(&data);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "RAD60 read failed: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    ESP_LOGI(TAG, "RAD60: comm=%d detected=%d objects=%u", data.is_comm_ok, data.is_detected, data.radar_info.obj_num);
-    uint8_t object_count = data.radar_info.obj_num > 2U ? 2U : data.radar_info.obj_num;
-    for (uint8_t index = 0; index < object_count; ++index) {
-        const multitarget_obj_info_t *object = &data.radar_info.obj[index];
-        ESP_LOGI(TAG, "  object[%u]: distance=%u cm angle=%d deg velocity=%d cm/s id=%u", index, object->range_val, object->angle_val, object->velo_val,
-                 object->objid);
+        ESP_LOGE(TAG, "RAD60 init failed");
     }
 }
 
@@ -1698,8 +1693,9 @@ static void radar_deinit(void) {
         return;
     }
 
-    esp_err_t ret = yoke_rad60_deinit();
+    esp_err_t ret = yoke_rad60_deinit(s_radar);
     if (ret == ESP_OK) {
+        s_radar = NULL;
         s_radar_initialized = false;
         ESP_LOGI(TAG, "RAD60 deinitialized");
     } else {
@@ -1710,10 +1706,11 @@ static void radar_deinit(void) {
 void app_main(void) {
     zxacc_maker_init();
 
-    if (yoke_screen_with_lvgl_init() == NULL) {
+    if (yoke_screen_with_lvgl_init(rootmaker_sys_i2c_port) == NULL) {
         ESP_LOGE(TAG, "Screen initialization failed; continuing without UI");
         return;
     }
 
     screen_create_ui();
+    log_ui_memory("After UI creation");
 }

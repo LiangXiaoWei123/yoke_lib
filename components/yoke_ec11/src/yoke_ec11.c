@@ -25,11 +25,14 @@ struct yoke_ec11 {
     i2c_master_bus_handle_t bus_handle;
     i2c_master_dev_handle_t dev_handle;
     rootmaker_port_t port;
+    gpio_num_t pins[2];
     uint8_t device_address;
     uint32_t scl_speed_hz;
     uint32_t timeout_ms;
     bool bus_ref_held;
     bool initialized;
+    bool stopping;
+    bool address_held;
 };
 
 static bool yoke_is_address_valid(uint8_t address) {
@@ -37,7 +40,7 @@ static bool yoke_is_address_valid(uint8_t address) {
 }
 
 static esp_err_t yoke_check(yoke_ec11_handle_t yoke) {
-    if (yoke == NULL || !yoke->initialized || yoke->dev_handle == NULL) {
+    if (yoke == NULL || !yoke->initialized || yoke->stopping || yoke->dev_handle == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
@@ -82,18 +85,18 @@ static esp_err_t yoke_add_device(yoke_ec11_handle_t yoke, uint8_t address) {
     return ret;
 }
 
-static bool yoke_config_is_valid(yoke_ec11_config_t *config) {
+static bool yoke_config_is_valid(rootmaker_port_t port, const yoke_ec11_config_t *config) {
     if (config == NULL || !yoke_is_address_valid(config->device_address) || config->scl_speed_hz == 0U || config->timeout_ms == 0U ||
         config->timeout_ms > INT_MAX) {
         return false;
     }
     gpio_num_t sda;
     gpio_num_t scl;
-    return rootmaker_get_port_pins(&config->port, &sda, &scl) == ESP_OK && sda != scl;
+    return rootmaker_get_port_pins(&port, &sda, &scl) == ESP_OK && sda != scl;
 }
 
-yoke_ec11_handle_t yoke_ec11_init_with_config(yoke_ec11_config_t *config) {
-    if (!yoke_config_is_valid(config)) {
+yoke_ec11_handle_t yoke_ec11_init_with_config(rootmaker_port_t port, const yoke_ec11_config_t *config) {
+    if (!yoke_config_is_valid(port, config)) {
         ESP_LOGE(TAG, "invalid configuration");
         return NULL;
     }
@@ -103,7 +106,9 @@ yoke_ec11_handle_t yoke_ec11_init_with_config(yoke_ec11_config_t *config) {
         ESP_LOGE(TAG, "no mem");
         return NULL;
     }
-    yoke->port = config->port;
+    yoke->pins[0] = port.pins[0];
+    yoke->pins[1] = port.pins[1];
+    yoke->port = (rootmaker_port_t){ .type = port.type, .pin_num = 2, .pins = yoke->pins };
     yoke->device_address = config->device_address;
     yoke->scl_speed_hz = config->scl_speed_hz;
     yoke->timeout_ms = config->timeout_ms;
@@ -115,9 +120,18 @@ yoke_ec11_handle_t yoke_ec11_init_with_config(yoke_ec11_config_t *config) {
         return NULL;
     }
     yoke->bus_ref_held = true;
+    ret = rootmaker_claim_i2c_address(yoke->bus_handle, yoke->device_address);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C address already bound or unavailable: %s", esp_err_to_name(ret));
+        (void)rootmaker_del_i2c_bus(&yoke->port);
+        free(yoke);
+        return NULL;
+    }
+    yoke->address_held = true;
     ret = yoke_add_device(yoke, config->device_address);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "add device failed: %s", esp_err_to_name(ret));
+        (void)rootmaker_release_i2c_address(yoke->bus_handle, yoke->device_address);
         (void)rootmaker_del_i2c_bus(&yoke->port);
         free(yoke);
         return NULL;
@@ -143,35 +157,36 @@ yoke_ec11_handle_t yoke_ec11_init_with_config(yoke_ec11_config_t *config) {
 }
 
 yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {
-    yoke_ec11_config_t config = YOKE_EC11_CONFIG_DEFAULT(port);
-    return yoke_ec11_init_with_config(&config);
+    yoke_ec11_config_t config = YOKE_EC11_CONFIG_DEFAULT();
+    return yoke_ec11_init_with_config(port, &config);
 }
 
 esp_err_t yoke_ec11_deinit(yoke_ec11_handle_t yoke) {
-    if (yoke == NULL || (!yoke->initialized && !yoke->bus_ref_held)) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    esp_err_t first_error = ESP_OK;
+    if (yoke == NULL)
+        return ESP_ERR_INVALID_ARG;
+    yoke->stopping = true;
+    yoke->initialized = false;
+    esp_err_t ret;
     if (yoke->dev_handle != NULL) {
-        esp_err_t ret = i2c_master_bus_rm_device(yoke->dev_handle);
-        if (ret != ESP_OK) {
+        ret = i2c_master_bus_rm_device(yoke->dev_handle);
+        if (ret != ESP_OK)
             return ret;
-        }
         yoke->dev_handle = NULL;
-        yoke->initialized = false;
+    }
+    if (yoke->address_held) {
+        ret = rootmaker_release_i2c_address(yoke->bus_handle, yoke->device_address);
+        if (ret != ESP_OK)
+            return ret;
+        yoke->address_held = false;
     }
     if (yoke->bus_ref_held) {
-        esp_err_t ret = rootmaker_del_i2c_bus(&yoke->port);
-        if (ret == ESP_OK) {
-            yoke->bus_ref_held = false;
-        } else {
-            first_error = ret;
-        }
+        ret = rootmaker_del_i2c_bus(&yoke->port);
+        if (ret != ESP_OK)
+            return ret;
+        yoke->bus_ref_held = false;
     }
-    if (!yoke->bus_ref_held) {
-        free(yoke);
-    }
-    return first_error;
+    free(yoke);
+    return ESP_OK;
 }
 
 esp_err_t yoke_ec11_probe(yoke_ec11_handle_t yoke) {
@@ -274,14 +289,23 @@ esp_err_t yoke_ec11_configure_slave_address(yoke_ec11_handle_t yoke, uint8_t add
 }
 
 esp_err_t yoke_ec11_set_active_address(yoke_ec11_handle_t yoke, uint8_t device_address) {
-    if (yoke_check(yoke) != ESP_OK || !yoke_is_address_valid(device_address))
+    esp_err_t check = yoke_check(yoke);
+    if (check != ESP_OK)
+        return check;
+    if (!yoke_is_address_valid(device_address))
         return ESP_ERR_INVALID_ARG;
     if (device_address == yoke->device_address)
         return ESP_OK;
 
-    esp_err_t ret = i2c_master_device_change_address(yoke->dev_handle, device_address, yoke->timeout_ms);
+    esp_err_t ret = rootmaker_claim_i2c_address(yoke->bus_handle, device_address);
+    if (ret != ESP_OK)
+        return ret;
+    ret = i2c_master_device_change_address(yoke->dev_handle, device_address, yoke->timeout_ms);
     if (ret == ESP_OK) {
+        (void)rootmaker_release_i2c_address(yoke->bus_handle, yoke->device_address);
         yoke->device_address = device_address;
+    } else {
+        (void)rootmaker_release_i2c_address(yoke->bus_handle, device_address);
     }
     return ret;
 }

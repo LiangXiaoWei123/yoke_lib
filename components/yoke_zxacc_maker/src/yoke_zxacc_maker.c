@@ -1,3 +1,4 @@
+/** @file yoke_zxacc_maker.c */
 #include "yoke_zxacc_maker.h"
 #include "rootmaker_utils.h"
 
@@ -22,22 +23,29 @@ struct yoke_zxacc_maker {
     i2c_master_bus_handle_t i2c_bus;
     i2c_master_dev_handle_t i2c_device;
     rootmaker_port_t port;
+    gpio_num_t pins[2];
     bool bus_ref_held;
     bool initialized;
+    bool stopping;
+    bool address_held;
 };
 
 static bool zxacc_is_ready(yoke_zxacc_maker_handle_t board) {
-    return board != NULL && board->initialized && board->i2c_device != NULL;
+    return board != NULL && board->initialized && !board->stopping && board->i2c_device != NULL;
 }
 
 static esp_err_t zxacc_read(yoke_zxacc_maker_handle_t board, uint8_t reg, uint8_t *data, size_t size) {
-    if (!zxacc_is_ready(board) || data == NULL || size == 0)
+    if (board != NULL && !zxacc_is_ready(board))
+        return ESP_ERR_INVALID_STATE;
+    if (board == NULL || data == NULL || size == 0)
         return ESP_ERR_INVALID_ARG;
     return i2c_master_transmit_receive(board->i2c_device, &reg, sizeof(reg), data, size, ZXACC_I2C_TIMEOUT_MS);
 }
 
 static esp_err_t zxacc_write(yoke_zxacc_maker_handle_t board, uint8_t reg, const uint8_t *data, size_t size) {
-    if (!zxacc_is_ready(board) || data == NULL || size == 0 || size > 4)
+    if (board != NULL && !zxacc_is_ready(board))
+        return ESP_ERR_INVALID_STATE;
+    if (board == NULL || data == NULL || size == 0 || size > 4)
         return ESP_ERR_INVALID_ARG;
 
     uint8_t buffer[5] = { reg };
@@ -60,13 +68,18 @@ static esp_err_t zxacc_write_u16(yoke_zxacc_maker_handle_t board, uint8_t reg, u
     return zxacc_write(board, reg, data, sizeof(data));
 }
 
-yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(void) {
+yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(rootmaker_port_t port) {
+    gpio_num_t sda, scl;
+    if (rootmaker_get_port_pins(&port, &sda, &scl) != ESP_OK || sda == scl)
+        return NULL;
     yoke_zxacc_maker_handle_t board = calloc(1, sizeof(struct yoke_zxacc_maker));
     if (board == NULL) {
         ESP_LOGE(TAG, "no mem");
         return NULL;
     }
-    board->port = rootmaker_sys_i2c_port;
+    board->pins[0] = port.pins[0];
+    board->pins[1] = port.pins[1];
+    board->port = (rootmaker_port_t){ .type = port.type, .pin_num = 2, .pins = board->pins };
 
     esp_err_t ret = rootmaker_new_i2c_bus(&board->port, &board->i2c_bus);
     if (ret != ESP_OK) {
@@ -75,7 +88,15 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(void) {
         return NULL;
     }
     board->bus_ref_held = true;
+    ret = rootmaker_claim_i2c_address(board->i2c_bus, YOKE_ZXACC_MAKER_DEFAULT_I2C_ADDR);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C address already bound or unavailable: %s", esp_err_to_name(ret));
+        (void)rootmaker_del_i2c_bus(&board->port);
+        free(board);
+        return NULL;
+    }
 
+    board->address_held = true;
     const i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = YOKE_ZXACC_MAKER_DEFAULT_I2C_ADDR,
@@ -84,6 +105,7 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(void) {
     ret = i2c_master_bus_add_device(board->i2c_bus, &device_config, &board->i2c_device);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "add device failed: %s", esp_err_to_name(ret));
+        (void)rootmaker_release_i2c_address(board->i2c_bus, YOKE_ZXACC_MAKER_DEFAULT_I2C_ADDR);
         (void)rootmaker_del_i2c_bus(&board->port);
         free(board);
         return NULL;
@@ -93,17 +115,25 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(void) {
 }
 
 esp_err_t yoke_zxacc_maker_deinit(yoke_zxacc_maker_handle_t board) {
-    if (board == NULL || (!board->initialized && !board->bus_ref_held))
-        return ESP_ERR_INVALID_STATE;
+    if (board == NULL)
+        return ESP_ERR_INVALID_ARG;
+    board->stopping = true;
+    board->initialized = false;
+    esp_err_t ret;
     if (board->i2c_device != NULL) {
-        esp_err_t ret = i2c_master_bus_rm_device(board->i2c_device);
+        ret = i2c_master_bus_rm_device(board->i2c_device);
         if (ret != ESP_OK)
             return ret;
         board->i2c_device = NULL;
-        board->initialized = false;
+    }
+    if (board->address_held) {
+        ret = rootmaker_release_i2c_address(board->i2c_bus, YOKE_ZXACC_MAKER_DEFAULT_I2C_ADDR);
+        if (ret != ESP_OK)
+            return ret;
+        board->address_held = false;
     }
     if (board->bus_ref_held) {
-        esp_err_t ret = rootmaker_del_i2c_bus(&board->port);
+        ret = rootmaker_del_i2c_bus(&board->port);
         if (ret != ESP_OK)
             return ret;
         board->bus_ref_held = false;

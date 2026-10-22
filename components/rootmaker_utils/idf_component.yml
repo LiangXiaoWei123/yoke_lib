@@ -1,5 +1,5 @@
 version: "1.0.0"
-description: RootMaker interface port model and I2C bus pool for ESP-IDF
+description: RootMaker development board interface ports and I2C bus pool for ESP-IDF
 url: "https://github.com/LiangXiaoWei123/yoke_lib"
 repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
 repository_info:

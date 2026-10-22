@@ -1,5 +1,5 @@
 version: "1.0.0"
-description: Yoke-EC11 I2C encoder, button and onboard WS2812 LED driver for RootMaker boards
+description: Yoke-EC11 I2C encoder, button and onboard WS2812 LED driver for the RootMaker development board
 url: "https://github.com/LiangXiaoWei123/yoke_lib"
 repository: "https://github.com/LiangXiaoWei123/yoke_lib.git"
 repository_info:
@@ -10,7 +10,7 @@ maintainers:
 issues: "https://github.com/LiangXiaoWei123/yoke_lib/issues"
 dependencies:
   idf:
-    version: ">=5.3"
+    version: ">=5.5.3"
   ryzobeezero/rootmaker_utils:
     version: "^1.0.0"
     require: public

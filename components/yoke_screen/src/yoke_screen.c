@@ -2,6 +2,9 @@
  * SPDX-FileCopyrightText: 2022-2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Modified for RootMaker: board panel/touch setup, shared I2C lifecycle,
+ * exclusive GPIO reservations, and recoverable cleanup.
  */
 
 #include "freertos/FreeRTOS.h"
@@ -23,6 +26,9 @@
 #include "rootmaker_utils.h"
 
 #define YOKE_SCREEN_LVGL_TASK_STACK_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+/* esp_lvgl_port 2.x names its worker taskLVGL; it owns the singleton LVGL runtime. */
+#define YOKE_SCREEN_LVGL_TASK_NAME "taskLVGL"
+#define YOKE_SCREEN_STOP_TIMEOUT_MS 5000
 
 #if CONFIG_SPIRAM && SOC_PSRAM_DMA_CAPABLE
 #define YOKE_SCREEN_LVGL_DRAW_BUFFER_IN_EXTERNAL_MEMORY 1
@@ -44,7 +50,6 @@
 #define LCD_BL_ON_LEVEL (1)
 
 /* CST816T touch settings */
-#define TOUCH_I2C_PORT I2C_NUM_1
 #define TOUCH_I2C_CLOCK_HZ 400000
 #define TOUCH_I2C_ADDRESS 0x15
 #define TOUCH_I2C_TIMEOUT_MS 20
@@ -57,7 +62,7 @@
 #define LCD_GPIO_CS (LCD_CS)
 #define LCD_GPIO_BL (LCD_BL)
 
-static const char* TAG = "SCREEN";
+static const char *TAG = "SCREEN";
 
 static const st7789_lcd_init_cmd_t st7789_boe154_init[] = {
     // { cmd, data, data_size, delay_ms }
@@ -105,14 +110,33 @@ static st7789_vendor_config_t st7789_boe154_vendor_config = {
 static esp_lcd_panel_io_handle_t lcd_io = NULL;
 static esp_lcd_panel_handle_t lcd_panel = NULL;
 static bool lcd_spi_initialized = false;
+static bool lvgl_initialized = false;
+static bool lvgl_stop_requested = false;
+static bool screen_stopping = false;
+static bool touch_reset_configured = false;
+static bool backlight_configured = false;
+static bool screen_gpio_held = false;
+static gpio_num_t touch_pins[2];
+/* Reserve all board display/touch signals except the shared SDA/SCL pair.
+ * TP_INT is wired to the touch controller even though this driver polls it. */
+static gpio_num_t screen_pins[] = {
+    LCD_GPIO_SCLK, LCD_GPIO_MOSI, LCD_GPIO_RST, LCD_GPIO_DC,
+    LCD_GPIO_CS, LCD_GPIO_BL, TP_RST, TP_INT,
+};
+static rootmaker_port_t screen_gpio_port = {
+    .type = ROOTMAKER_PORT_TYPE_F_BUS,
+    .pin_num = sizeof(screen_pins) / sizeof(screen_pins[0]),
+    .pins = screen_pins,
+};
 
 /* LVGL display and touch */
-static lv_display_t* lvgl_disp = NULL;
-static lv_indev_t* touch_indev = NULL;
+static lv_display_t *lvgl_disp = NULL;
+static lv_indev_t *touch_indev = NULL;
 static i2c_master_bus_handle_t touch_i2c_bus = NULL;
 static i2c_master_dev_handle_t touch_i2c_device = NULL;
 static rootmaker_port_t touch_i2c_port;
 static bool touch_i2c_bus_ref_held = false;
+static bool touch_address_held = false;
 
 static esp_err_t touch_init(void) {
     if (touch_i2c_device != NULL)
@@ -123,32 +147,21 @@ static esp_err_t touch_init(void) {
         .mode = GPIO_MODE_OUTPUT,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&reset_config), TAG, "Touch reset GPIO configuration failed");
+    touch_reset_configured = true;
     ESP_RETURN_ON_ERROR(gpio_set_level(TP_RST, 0), TAG, "Touch reset assert failed");
     vTaskDelay(pdMS_TO_TICKS(10));
     ESP_RETURN_ON_ERROR(gpio_set_level(TP_RST, 1), TAG, "Touch reset release failed");
     vTaskDelay(pdMS_TO_TICKS(100));
-
-    rootmaker_port_t sys_port = rootmaker_sys_i2c_port;
-    esp_err_t ret = rootmaker_new_i2c_bus(&sys_port, &touch_i2c_bus);
-    ESP_RETURN_ON_ERROR(ret, TAG, "Touch I2C bus initialization failed");
-    touch_i2c_port = sys_port;
-    touch_i2c_bus_ref_held = true;
 
     const i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = TOUCH_I2C_ADDRESS,
         .scl_speed_hz = TOUCH_I2C_CLOCK_HZ,
     };
-    ret = i2c_master_bus_add_device(touch_i2c_bus, &device_config, &touch_i2c_device);
-    if (ret != ESP_OK) {
-        (void)rootmaker_del_i2c_bus(&sys_port);
-        touch_i2c_bus = NULL;
-        touch_i2c_bus_ref_held = false;
-    }
-    return ret;
+    return i2c_master_bus_add_device(touch_i2c_bus, &device_config, &touch_i2c_device);
 }
 
-static bool touch_read(uint16_t* x, uint16_t* y) {
+static bool touch_read(uint16_t *x, uint16_t *y) {
     if (touch_i2c_device == NULL || x == NULL || y == NULL)
         return false;
 
@@ -170,12 +183,16 @@ static bool touch_read(uint16_t* x, uint16_t* y) {
     return true;
 }
 
+static esp_err_t screen_cleanup(void);
+
 static esp_err_t app_lcd_init(void) {
     esp_err_t ret = ESP_OK;
 
     /* LCD backlight */
     gpio_config_t bk_gpio_config = { .mode = GPIO_MODE_OUTPUT, .pin_bit_mask = 1ULL << LCD_GPIO_BL };
     ESP_GOTO_ON_ERROR(gpio_config(&bk_gpio_config), err, TAG, "Backlight GPIO configuration failed");
+    backlight_configured = true;
+    ESP_GOTO_ON_ERROR(gpio_set_level(LCD_GPIO_BL, 0), err, TAG, "Backlight disable failed");
 
     /* LCD initialization */
     ESP_LOGD(TAG, "Initialize SPI bus");
@@ -187,7 +204,7 @@ static esp_err_t app_lcd_init(void) {
         .quadhd_io_num = GPIO_NUM_NC,
         .max_transfer_sz = 64 * 1024,
     };
-    ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_SPI_NUM, &buscfg, SPI_DMA_CH_AUTO), TAG, "SPI init failed");
+    ESP_GOTO_ON_ERROR(spi_bus_initialize(LCD_SPI_NUM, &buscfg, SPI_DMA_CH_AUTO), err, TAG, "SPI init failed");
     lcd_spi_initialized = true;
 
     ESP_LOGD(TAG, "Install panel IO");
@@ -227,22 +244,10 @@ static esp_err_t app_lcd_init(void) {
     return ret;
 
 err:
-    if (lcd_panel) {
-        esp_lcd_panel_del(lcd_panel);
-    }
-    if (lcd_io) {
-        esp_lcd_panel_io_del(lcd_io);
-    }
-    if (lcd_spi_initialized) {
-        spi_bus_free(LCD_SPI_NUM);
-        lcd_spi_initialized = false;
-    }
-    lcd_panel = NULL;
-    lcd_io = NULL;
     return ret;
 }
 
-static void lvgl_port_touchpad_read(lv_indev_t* indev, lv_indev_data_t* data) {
+static void lvgl_port_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
     uint16_t x;
     uint16_t y;
@@ -255,7 +260,7 @@ static void lvgl_port_touchpad_read(lv_indev_t* indev, lv_indev_data_t* data) {
     }
 }
 
-static esp_err_t lvgl_tp_init(lv_display_t* disp) {
+static esp_err_t lvgl_tp_init(lv_display_t *disp) {
     ESP_RETURN_ON_ERROR(touch_init(), TAG, "Touch initialization failed");
 
     lvgl_port_lock(0);
@@ -273,6 +278,9 @@ static esp_err_t lvgl_tp_init(lv_display_t* disp) {
 }
 
 static esp_err_t app_lvgl_init(void) {
+    /* Do not overwrite a runtime owned by another user, or one still exiting. */
+    if (xTaskGetHandle(YOKE_SCREEN_LVGL_TASK_NAME) != NULL || lv_is_initialized())
+        return ESP_ERR_INVALID_STATE;
     /* Initialize LVGL */
     const lvgl_port_cfg_t lvgl_cfg = {
         .task_priority = 4,       /* LVGL task priority */
@@ -283,13 +291,15 @@ static esp_err_t app_lvgl_init(void) {
         .timer_period_ms = 5 /* LVGL timer tick period in ms */
     };
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port initialization failed");
+    lvgl_initialized = true;
 
     /* Add LCD screen */
     ESP_LOGD(TAG, "Add LCD screen");
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = lcd_io,
         .panel_handle = lcd_panel,
-        .buffer_size = LCD_H_RES * LCD_V_RES * 2,
+        /* esp_lvgl_port takes pixels and applies the RGB565 byte size itself. */
+        .buffer_size = LCD_H_RES * LCD_V_RES,
         .double_buffer = LCD_DRAW_BUFF_DOUBLE,
         .hres = LCD_H_RES,
         .vres = LCD_V_RES,
@@ -314,14 +324,10 @@ static esp_err_t app_lvgl_init(void) {
     lvgl_disp = lvgl_port_add_disp(&disp_cfg);
     if (lvgl_disp == NULL) {
         ESP_LOGE(TAG, "LVGL display buffer allocation failed");
-        lvgl_port_deinit();
         return ESP_ERR_NO_MEM;
     }
     esp_err_t ret = lvgl_tp_init(lvgl_disp);
     if (ret != ESP_OK) {
-        lvgl_port_remove_disp(lvgl_disp);
-        lvgl_disp = NULL;
-        lvgl_port_deinit();
         return ret;
     }
 
@@ -329,106 +335,172 @@ static esp_err_t app_lvgl_init(void) {
 }
 
 static esp_err_t screen_cleanup(void) {
-    esp_err_t first_error = ESP_OK;
-
-    gpio_set_level(LCD_GPIO_BL, 0);
-
+    screen_stopping = true;
+    esp_err_t ret;
+    if (backlight_configured) {
+        ret = gpio_set_level(LCD_GPIO_BL, 0);
+        if (ret != ESP_OK)
+            return ret;
+    }
     if (touch_indev != NULL) {
-        lvgl_port_lock(0);
+        if (!lvgl_port_lock(0))
+            return ESP_ERR_TIMEOUT;
         lv_indev_delete(touch_indev);
-        lvgl_port_unlock();
         touch_indev = NULL;
+        lvgl_port_unlock();
     }
     if (lvgl_disp != NULL) {
-        esp_err_t ret = lvgl_port_remove_disp(lvgl_disp);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
-        if (ret == ESP_OK)
-            lvgl_disp = NULL;
+        /* Hold the LVGL lock across draining and removal so no new flush can
+         * start. A parameter transaction waits for queued SPI color transfers,
+         * including their flush-ready callbacks, before returning. */
+        if (!lvgl_port_lock(0))
+            return ESP_ERR_TIMEOUT;
+        ret = esp_lcd_panel_io_tx_param(lcd_io, -1, NULL, 0);
+        if (ret != ESP_OK) {
+            lvgl_port_unlock();
+            return ret;
+        }
+        ret = lvgl_port_remove_disp(lvgl_disp);
+        lvgl_port_unlock();
+        if (ret != ESP_OK)
+            return ret;
+        lvgl_disp = NULL;
+    }
+    if (lvgl_initialized) {
+        if (!lvgl_stop_requested) {
+            /* Wake before requesting stop: an idle worker may sleep 500 ms. */
+            (void)lvgl_port_task_wake(LVGL_PORT_EVENT_USER, NULL);
+            ret = lvgl_port_deinit();
+            if (ret != ESP_OK)
+                return ret;
+            lvgl_stop_requested = true;
+        }
+        const TickType_t stop_tick = xTaskGetTickCount();
+        /* Look up the name afresh instead of dereferencing a deleted TCB. */
+        while (xTaskGetHandle(YOKE_SCREEN_LVGL_TASK_NAME) != NULL) {
+            if (xTaskGetTickCount() - stop_tick >= pdMS_TO_TICKS(YOKE_SCREEN_STOP_TIMEOUT_MS))
+                return ESP_ERR_TIMEOUT;
+            vTaskDelay(1);
+        }
+        lvgl_initialized = false;
+        lvgl_stop_requested = false;
     }
     if (touch_i2c_device != NULL) {
-        esp_err_t ret = i2c_master_bus_rm_device(touch_i2c_device);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
-        if (ret == ESP_OK)
-            touch_i2c_device = NULL;
+        ret = i2c_master_bus_rm_device(touch_i2c_device);
+        if (ret != ESP_OK)
+            return ret;
+        touch_i2c_device = NULL;
     }
-    if (lvgl_disp != NULL || touch_i2c_device != NULL)
-        return first_error;
-
-    esp_err_t ret = lvgl_port_deinit();
-    if (ret != ESP_OK && first_error == ESP_OK)
-        first_error = ret;
-
+    if (touch_address_held) {
+        ret = rootmaker_release_i2c_address(touch_i2c_bus, TOUCH_I2C_ADDRESS);
+        if (ret != ESP_OK)
+            return ret;
+        touch_address_held = false;
+    }
     if (touch_i2c_bus_ref_held) {
         ret = rootmaker_del_i2c_bus(&touch_i2c_port);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
-        if (ret == ESP_OK) {
-            touch_i2c_bus_ref_held = false;
-            touch_i2c_bus = NULL;
-        }
+        if (ret != ESP_OK)
+            return ret;
+        touch_i2c_bus_ref_held = false;
+        touch_i2c_bus = NULL;
     }
-
     if (lcd_panel != NULL) {
         ret = esp_lcd_panel_disp_on_off(lcd_panel, false);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
+        if (ret != ESP_OK)
+            return ret;
         ret = esp_lcd_panel_del(lcd_panel);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
-        if (ret == ESP_OK)
-            lcd_panel = NULL;
+        if (ret != ESP_OK)
+            return ret;
+        lcd_panel = NULL;
     }
     if (lcd_io != NULL) {
         ret = esp_lcd_panel_io_del(lcd_io);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
-        if (ret == ESP_OK)
-            lcd_io = NULL;
+        if (ret != ESP_OK)
+            return ret;
+        lcd_io = NULL;
     }
     if (lcd_spi_initialized) {
         ret = spi_bus_free(LCD_SPI_NUM);
-        if (ret != ESP_OK && first_error == ESP_OK)
-            first_error = ret;
-        if (ret == ESP_OK)
-            lcd_spi_initialized = false;
+        if (ret != ESP_OK)
+            return ret;
+        lcd_spi_initialized = false;
     }
-    gpio_reset_pin(TP_RST);
-    return first_error;
+    if (touch_reset_configured) {
+        ret = gpio_reset_pin(TP_RST);
+        if (ret != ESP_OK)
+            return ret;
+        touch_reset_configured = false;
+    }
+    if (backlight_configured) {
+        ret = gpio_reset_pin(LCD_GPIO_BL);
+        if (ret != ESP_OK)
+            return ret;
+        backlight_configured = false;
+    }
+    if (screen_gpio_held) {
+        ret = rootmaker_release_port(&screen_gpio_port);
+        if (ret != ESP_OK)
+            return ret;
+        screen_gpio_held = false;
+    }
+    screen_stopping = false;
+    return ESP_OK;
 }
 
-lv_display_t* yoke_screen_with_lvgl_init(void) {
-    if (lcd_panel != NULL || lvgl_disp != NULL || touch_i2c_device != NULL)
+lv_display_t *yoke_screen_with_lvgl_init(rootmaker_port_t port) {
+    if (screen_stopping || lcd_spi_initialized || lcd_io != NULL || lvgl_initialized || touch_i2c_bus_ref_held || lcd_panel != NULL || lvgl_disp != NULL ||
+        touch_i2c_device != NULL || screen_gpio_held)
         return NULL;
+
+    gpio_num_t sda, scl;
+    if (rootmaker_get_port_pins(&port, &sda, &scl) != ESP_OK || sda == scl)
+        return NULL;
+    touch_pins[0] = sda;
+    touch_pins[1] = scl;
+    touch_i2c_port = (rootmaker_port_t){ .type = port.type, .pin_num = 2, .pins = touch_pins };
+
+    /* Acquire resources before touching hardware. SDA/SCL remain shareable;
+     * every other screen signal is exclusive until cleanup completes. */
+    esp_err_t ret = rootmaker_use_port(&screen_gpio_port);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Screen GPIO reservation failed: %s", esp_err_to_name(ret));
+        return NULL;
+    }
+    screen_gpio_held = true;
+    ret = rootmaker_new_i2c_bus(&touch_i2c_port, &touch_i2c_bus);
+    if (ret != ESP_OK)
+        goto fail;
+    touch_i2c_bus_ref_held = true;
+    ret = rootmaker_claim_i2c_address(touch_i2c_bus, TOUCH_I2C_ADDRESS);
+    if (ret != ESP_OK)
+        goto fail;
+    touch_address_held = true;
 
     /* LCD HW initialization */
-    if (app_lcd_init() != ESP_OK) {
-        return NULL;
-    }
+    ret = app_lcd_init();
+    if (ret != ESP_OK)
+        goto fail;
 
     /* LVGL initialization */
-    if (app_lvgl_init() != ESP_OK) {
-        (void)screen_cleanup();
-        return NULL;
-    }
+    ret = app_lvgl_init();
+    if (ret != ESP_OK)
+        goto fail;
 
     return lvgl_disp;
+
+fail:
+    ESP_LOGE(TAG, "Screen initialization failed: %s", esp_err_to_name(ret));
+    ret = screen_cleanup();
+    if (ret != ESP_OK)
+        ESP_LOGE(TAG, "Screen cleanup incomplete; retry yoke_screen_deinit(): %s", esp_err_to_name(ret));
+    return NULL;
 }
 
 esp_err_t yoke_screen_deinit(void) {
     if (lcd_panel == NULL && lcd_io == NULL && !lcd_spi_initialized && lvgl_disp == NULL && touch_indev == NULL && touch_i2c_device == NULL &&
-        !touch_i2c_bus_ref_held) {
+        !touch_i2c_bus_ref_held && !touch_address_held && !lvgl_initialized && !touch_reset_configured && !backlight_configured && !screen_gpio_held &&
+        !screen_stopping) {
         return ESP_ERR_INVALID_STATE;
     }
     return screen_cleanup();
-}
-
-void yoke_screen_draw_bitmap(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data) {
-    if (lcd_panel == NULL || data == NULL || w == 0 || h == 0 || x >= LCD_H_RES || y >= LCD_V_RES || w > LCD_H_RES - x || h > LCD_V_RES - y) {
-        ESP_LOGE(TAG, "Invalid bitmap: x=%u y=%u w=%u h=%u", x, y, w, h);
-        return;
-    }
-
-    esp_lcd_panel_draw_bitmap(lcd_panel, x, y, x + w, y + h, data);
 }

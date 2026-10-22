@@ -25,7 +25,7 @@ typedef struct {
 
 static rootmaker_used_port_t s_used_ports[ROOTMAKER_MAX_USED_PORTS];
 
-static bool rootmaker_port_has_pin(rootmaker_port_t *port, gpio_num_t pin) {
+static bool rootmaker_port_has_pin(const rootmaker_port_t *port, gpio_num_t pin) {
     if (port == NULL || port->pins == NULL || pin == GPIO_NUM_NC) {
         return false;
     }
@@ -37,7 +37,7 @@ static bool rootmaker_port_has_pin(rootmaker_port_t *port, gpio_num_t pin) {
     return false;
 }
 
-static bool rootmaker_ports_overlap(rootmaker_port_t *a, rootmaker_port_t *b) {
+static bool rootmaker_ports_overlap(const rootmaker_port_t *a, const rootmaker_port_t *b) {
     if (a == NULL || b == NULL || a->pins == NULL || b->pins == NULL) {
         return false;
     }
@@ -92,11 +92,11 @@ const rootmaker_port_t rootmaker_sys_i2c_port = {
     .pins = (gpio_num_t[]){ BOADR_SDA, BOADR_SCL },
 };
 
-esp_err_t rootmaker_get_port_pins(rootmaker_port_t *port, gpio_num_t *pin_a, gpio_num_t *pin_b) {
+esp_err_t rootmaker_get_port_pins(const rootmaker_port_t *port, gpio_num_t *pin_a, gpio_num_t *pin_b) {
     if (port == NULL || pin_a == NULL || pin_b == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (port->pin_num < 2 || port->pins == NULL || port->pins[0] == GPIO_NUM_NC || port->pins[1] == GPIO_NUM_NC) {
+    if (port->pin_num < 2 || port->pins == NULL || !GPIO_IS_VALID_GPIO(port->pins[0]) || !GPIO_IS_VALID_GPIO(port->pins[1])) {
         return ESP_ERR_INVALID_ARG;
     }
     *pin_a = port->pins[0];
@@ -104,20 +104,24 @@ esp_err_t rootmaker_get_port_pins(rootmaker_port_t *port, gpio_num_t *pin_a, gpi
     return ESP_OK;
 }
 
-esp_err_t rootmaker_get_port_pin(rootmaker_port_t *port, uint8_t index, gpio_num_t *pin) {
+esp_err_t rootmaker_get_port_pin(const rootmaker_port_t *port, uint8_t index, gpio_num_t *pin) {
     if (port == NULL || pin == NULL || port->pins == NULL || index >= port->pin_num) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (port->pins[index] == GPIO_NUM_NC) {
+    if (!GPIO_IS_VALID_GPIO(port->pins[index])) {
         return ESP_ERR_INVALID_ARG;
     }
     *pin = port->pins[index];
     return ESP_OK;
 }
 
-esp_err_t rootmaker_use_port(rootmaker_port_t *port) {
+esp_err_t rootmaker_use_port(const rootmaker_port_t *port) {
     if (port == NULL || port->pins == NULL || port->pin_num == 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+    for (uint8_t i = 0; i < port->pin_num; i++) {
+        if (!GPIO_IS_VALID_GPIO(port->pins[i]))
+            return ESP_ERR_INVALID_ARG;
     }
     for (int i = 0; i < ROOTMAKER_MAX_USED_PORTS; i++) {
         if (s_used_ports[i].used && rootmaker_ports_overlap(&s_used_ports[i].port, port)) {
@@ -125,8 +129,7 @@ esp_err_t rootmaker_use_port(rootmaker_port_t *port) {
         }
     }
     for (int i = 0; i < I2C_NUM_MAX; i++) {
-        if (s_i2c_buses[i].in_use &&
-            (rootmaker_port_has_pin(port, s_i2c_buses[i].sda) || rootmaker_port_has_pin(port, s_i2c_buses[i].scl))) {
+        if (s_i2c_buses[i].in_use && (rootmaker_port_has_pin(port, s_i2c_buses[i].sda) || rootmaker_port_has_pin(port, s_i2c_buses[i].scl))) {
             return ESP_ERR_INVALID_STATE;
         }
     }
@@ -140,7 +143,7 @@ esp_err_t rootmaker_use_port(rootmaker_port_t *port) {
     return ESP_ERR_NO_MEM;
 }
 
-esp_err_t rootmaker_release_port(rootmaker_port_t *port) {
+esp_err_t rootmaker_release_port(const rootmaker_port_t *port) {
     if (port == NULL || port->pins == NULL || port->pin_num == 0) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -154,7 +157,7 @@ esp_err_t rootmaker_release_port(rootmaker_port_t *port) {
     return ESP_ERR_NOT_FOUND;
 }
 
-bool rootmaker_port_is_used(rootmaker_port_t *port) {
+bool rootmaker_port_is_used(const rootmaker_port_t *port) {
     if (port == NULL || port->pins == NULL || port->pin_num == 0) {
         return false;
     }
@@ -164,15 +167,14 @@ bool rootmaker_port_is_used(rootmaker_port_t *port) {
         }
     }
     for (int i = 0; i < I2C_NUM_MAX; i++) {
-        if (s_i2c_buses[i].in_use &&
-            (rootmaker_port_has_pin(port, s_i2c_buses[i].sda) || rootmaker_port_has_pin(port, s_i2c_buses[i].scl))) {
+        if (s_i2c_buses[i].in_use && (rootmaker_port_has_pin(port, s_i2c_buses[i].sda) || rootmaker_port_has_pin(port, s_i2c_buses[i].scl))) {
             return true;
         }
     }
     return false;
 }
 
-esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t *out_bus) {
+esp_err_t rootmaker_new_i2c_bus(const rootmaker_port_t *port, i2c_master_bus_handle_t *out_bus) {
     if (port == NULL || out_bus == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -184,10 +186,12 @@ esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t 
     if (ret != ESP_OK) {
         return ret;
     }
+    if (sda == scl) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     for (int i = 0; i < ROOTMAKER_MAX_USED_PORTS; i++) {
-        if (s_used_ports[i].used &&
-            (rootmaker_port_has_pin(&s_used_ports[i].port, sda) || rootmaker_port_has_pin(&s_used_ports[i].port, scl))) {
+        if (s_used_ports[i].used && (rootmaker_port_has_pin(&s_used_ports[i].port, sda) || rootmaker_port_has_pin(&s_used_ports[i].port, scl))) {
             return ESP_ERR_INVALID_STATE;
         }
     }
@@ -202,6 +206,15 @@ esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t 
             entry->ref_count++;
             *out_bus = entry->bus;
             return ESP_OK;
+        }
+    }
+
+    /* Different buses must not drive any of the same signal pins, including
+     * SDA/SCL swaps. Only an exact, ordered pair can share a controller. */
+    for (int i = 0; i < I2C_NUM_MAX; i++) {
+        rootmaker_i2c_bus_t *entry = &s_i2c_buses[i];
+        if (entry->in_use && (entry->sda == sda || entry->sda == scl || entry->scl == sda || entry->scl == scl)) {
+            return ESP_ERR_INVALID_STATE;
         }
     }
 
@@ -237,7 +250,7 @@ esp_err_t rootmaker_new_i2c_bus(rootmaker_port_t *port, i2c_master_bus_handle_t 
     return ESP_ERR_INVALID_STATE;
 }
 
-esp_err_t rootmaker_del_i2c_bus(rootmaker_port_t *port) {
+esp_err_t rootmaker_del_i2c_bus(const rootmaker_port_t *port) {
     if (port == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -261,6 +274,41 @@ esp_err_t rootmaker_del_i2c_bus(rootmaker_port_t *port) {
                 return ret;
             }
             memset(entry, 0, sizeof(*entry));
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+#define ROOTMAKER_MAX_I2C_DEVICES 32
+static struct {
+    i2c_master_bus_handle_t bus;
+    uint8_t address;
+} s_i2c_devices[ROOTMAKER_MAX_I2C_DEVICES];
+
+esp_err_t rootmaker_claim_i2c_address(i2c_master_bus_handle_t bus, uint8_t address) {
+    if (bus == NULL || address < 0x08 || address > 0x77)
+        return ESP_ERR_INVALID_ARG;
+    int free_slot = -1;
+    for (int i = 0; i < ROOTMAKER_MAX_I2C_DEVICES; i++) {
+        if (s_i2c_devices[i].bus == bus && s_i2c_devices[i].address == address)
+            return ESP_ERR_INVALID_STATE;
+        if (s_i2c_devices[i].bus == NULL && free_slot < 0)
+            free_slot = i;
+    }
+    if (free_slot < 0)
+        return ESP_ERR_NO_MEM;
+    s_i2c_devices[free_slot].bus = bus;
+    s_i2c_devices[free_slot].address = address;
+    return ESP_OK;
+}
+
+esp_err_t rootmaker_release_i2c_address(i2c_master_bus_handle_t bus, uint8_t address) {
+    if (bus == NULL || address < 0x08 || address > 0x77)
+        return ESP_ERR_INVALID_ARG;
+    for (int i = 0; i < ROOTMAKER_MAX_I2C_DEVICES; i++) {
+        if (s_i2c_devices[i].bus == bus && s_i2c_devices[i].address == address) {
+            s_i2c_devices[i].bus = NULL;
             return ESP_OK;
         }
     }

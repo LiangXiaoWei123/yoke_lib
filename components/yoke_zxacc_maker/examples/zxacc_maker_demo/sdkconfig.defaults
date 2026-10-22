@@ -1,2 +1,2 @@
-# Demo target: RootMaker boards use ESP32-S3. Remove to build for another target.
+# RootMaker development board (ESP32-S3).
 CONFIG_IDF_TARGET="esp32s3"

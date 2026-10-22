@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* Document the RootMaker development board scope without adding a targets list.
+
+* Clarify device attachment versus probing, millisecond button timing and second-based wake-up.
+
 ## 1.0.0 - 2026-08-04
 
 ### Added

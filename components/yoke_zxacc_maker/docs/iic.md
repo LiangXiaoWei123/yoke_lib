@@ -18,7 +18,7 @@ behavior over I2C.
 > `i2c_master_*` APIs; do not shift it into the `0xE6/0xE7` wire-format
 > read/write addresses.
 
-`yoke_zxacc_maker_init()` uses the fixed onboard system-I2C pins and device
+`yoke_zxacc_maker_init(rootmaker_sys_i2c_port)` uses the supplied system-I2C port and device
 address. It acquires or reuses the shared bus through `rootmaker_utils` and
 holds one bus reference after successful initialization.
 `yoke_zxacc_maker_deinit()` removes only its device and releases one reference.

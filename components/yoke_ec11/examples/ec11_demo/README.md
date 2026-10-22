@@ -17,6 +17,8 @@ Change `rootmaker_rs_port1` in `main/ec11_demo_main.c` to select a different
 expansion port. The driver acquires or reuses the matching bus through
 `rootmaker_utils`.
 
+Requires ESP-IDF 5.5.3 or later.
+
 ## Build and flash
 
 ```sh

@@ -10,6 +10,6 @@ idf_component_register(
         yoke_rgbw
         yoke_screen
         yoke_zxacc_maker
-        esp_lvgl_port
+        espressif__esp_lvgl_port
         freertos
 )

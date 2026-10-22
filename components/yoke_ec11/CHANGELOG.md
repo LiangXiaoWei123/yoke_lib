@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+* Document the RootMaker development board scope without adding a targets list.
+
+* Declare ESP-IDF >=5.5.3, matching the verified SDK and address-change API.
+* Accept read-only initialization configuration and document read-to-clear/address semantics.
+
 ## 1.0.0 - 2026-08-04
 
 ### Added
