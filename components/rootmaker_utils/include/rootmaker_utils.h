@@ -44,7 +44,7 @@ typedef enum {
  */
 typedef struct {
     rootmaker_port_type_t type;
-    uint8_t pin_num;  /**< Number of valid pins. */
+    uint8_t pin_num;        /**< Number of valid pins. */
     const gpio_num_t *pins; /**< Read-only GPIO array of `pin_num` entries. */
 } rootmaker_port_t;
 

@@ -1,9 +1,13 @@
 #pragma once
 
-// =============================================================================
-//   Expansion port selection (shared by KEYW, MOTO, RGBW, RAD60)
-// =============================================================================
+/** @file rootmaker_pin.h
+ *  @brief GPIO assignments for the RootMaker board.
+ *
+ *  Connector macro suffixes identify connector pin positions; the values are
+ *  ESP32-S3 GPIO numbers. Pins shared by multiple connectors keep the same GPIO.
+ */
 
+// Expansion port identifiers shared by KEYW, MOTO, RGBW, and RAD60.
 enum Rootmaker_RsPort_t {
     RS_PORT1 = 0x00,
     RS_PORT2 = 0x01,
@@ -11,48 +15,52 @@ enum Rootmaker_RsPort_t {
     RS_PORT4 = 0x03,
 };
 
+// Board peripherals
+
 // UART0
 #define TX 43
 #define RX 44
 
-// LED
+// On-board LED and button
 #define PIN_RGB_LED 45
+#define BTN_PIN 0
 
-// 6Dsensor + LED
-#define SEN_INT 42
+// System I2C, shared with the touch panel and power baseboard
 #define BOADR_SDA 41
 #define BOADR_SCL 40
 
-// LCD
+// Motion sensor interrupt
+#define SEN_INT 42
+
+// LCD (SDA is SPI MOSI; RS is data/command)
 #define LCD_SDA 9
-#define LCD_BL 7
+#define LCD_SCK 12
 #define LCD_CS 5
 #define LCD_RS 3
-#define LCD_SCK 12
 #define LCD_RST 10
+#define LCD_BL 7
 
-// TP
-#define TP_INT 1
+// Touch panel (shares the system I2C bus)
 #define TP_SDA 41
 #define TP_SCL 40
+#define TP_INT 1
 #define TP_RST 2
 
-// SPI
-#define SPI_SS 29
+// SPI bus
 #define SPI_MOSI 31
 #define SPI_MISO 32
 #define SPI_SCK 30
+#define SPI_SS 29
 #define SPI_WP 28
 #define SPI_HD 27
 
-// BTN
-#define BTN_PIN 0
-
-// THERMAL UART
+// Thermal module UART
 #define THERMAL_UART_TX 4
 #define THERMAL_UART_RX 6
 
-// 4 expansion interfaces
+// Expansion connectors
+
+// Two-pin RS ports
 #define PORT1_PIN1 15
 #define PORT1_PIN2 16
 
@@ -65,7 +73,7 @@ enum Rootmaker_RsPort_t {
 #define PORT4_PIN1 17
 #define PORT4_PIN2 18
 
-// F_BUS
+// F_BUS connector
 #define F_BUS9 20
 #define F_BUS10 19
 #define F_BUS11 12
@@ -83,7 +91,7 @@ enum Rootmaker_RsPort_t {
 #define F_BUS23 BOADR_SDA
 #define F_BUS24 BOADR_SCL
 
-// S_BUS
+// S_BUS connector
 #define S_BUS1 48
 #define S_BUS2 47
 #define S_BUS3 46

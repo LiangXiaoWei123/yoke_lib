@@ -25,9 +25,8 @@
 const char *TAG = "main";
 
 static void log_ui_memory(const char *stage) {
-    ESP_LOGI(TAG, "%s: heap free=%zu, largest=%zu; internal free=%zu, largest=%zu bytes", stage,
-             heap_caps_get_free_size(MALLOC_CAP_8BIT), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+    ESP_LOGI(TAG, "%s: heap free=%zu, largest=%zu; internal free=%zu, largest=%zu bytes", stage, heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 

@@ -120,8 +120,7 @@ static gpio_num_t touch_pins[2];
 /* Reserve all board display/touch signals except the shared SDA/SCL pair.
  * TP_INT is wired to the touch controller even though this driver polls it. */
 static gpio_num_t screen_pins[] = {
-    LCD_GPIO_SCLK, LCD_GPIO_MOSI, LCD_GPIO_RST, LCD_GPIO_DC,
-    LCD_GPIO_CS, LCD_GPIO_BL, TP_RST, TP_INT,
+    LCD_GPIO_SCLK, LCD_GPIO_MOSI, LCD_GPIO_RST, LCD_GPIO_DC, LCD_GPIO_CS, LCD_GPIO_BL, TP_RST, TP_INT,
 };
 static rootmaker_port_t screen_gpio_port = {
     .type = ROOTMAKER_PORT_TYPE_F_BUS,

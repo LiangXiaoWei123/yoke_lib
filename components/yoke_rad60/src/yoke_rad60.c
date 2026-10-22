@@ -73,7 +73,8 @@ static void yoke_rad60_task(void *arg) {
     while (!atomic_load(&radar->stopping)) {
         /* Bound each batch so continuous reports cannot postpone health checks. */
         for (unsigned received = 0; received < UART_QUEUE_LENGTH && !atomic_load(&radar->stopping) &&
-             yoke_rad60_protocol_recv_frame(radar->protocol, &uart_frame, received == 0 ? 50 : 0); ++received) {
+                                    yoke_rad60_protocol_recv_frame(radar->protocol, &uart_frame, received == 0 ? 50 : 0);
+             ++received) {
             bool valid_data_received = false;
             if (uart_frame.frame_type == FRAME_TYPE_REPORT) {
                 if (yoke_rad60_process_report_frame(radar, uart_frame.report.len, uart_frame.report.type, uart_frame.report.buffer) == ESP_OK) {
