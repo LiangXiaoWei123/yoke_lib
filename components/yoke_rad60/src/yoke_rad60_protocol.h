@@ -48,6 +48,7 @@ extern "C" {
 
 typedef struct yoke_rad60_protocol *yoke_rad60_protocol_handle_t;
 
+/* On error, a non-NULL output is retained only for deinit retry by the owner. */
 esp_err_t yoke_rad60_protocol_init(uart_port_t uart_num, gpio_num_t tx_pin, gpio_num_t rx_pin, yoke_rad60_protocol_handle_t *out);
 esp_err_t yoke_rad60_protocol_deinit(yoke_rad60_protocol_handle_t protocol);
 void yoke_rad60_protocol_write_bytes(yoke_rad60_protocol_handle_t protocol, uint16_t cmd, const uint8_t *frame, uint32_t len);

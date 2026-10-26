@@ -35,7 +35,7 @@ void app_main(void) {
             ESP_LOGI(TAG, "comm=%d detected=%d objects=%u", data.is_comm_ok, data.is_detected, data.radar_info.obj_num);
             uint8_t count = data.radar_info.obj_num > 2U ? 2U : data.radar_info.obj_num;
             for (uint8_t i = 0; i < count; ++i) {
-                const multitarget_obj_info_t *obj = &data.radar_info.obj[i];
+                const yoke_rad60_target_t *obj = &data.radar_info.obj[i];
                 ESP_LOGI(TAG, "  obj[%u] dist=%ucm angle=%ddeg vel=%dcm/s id=%u", i, obj->range_val, obj->angle_val, obj->velo_val, obj->objid);
             }
         }

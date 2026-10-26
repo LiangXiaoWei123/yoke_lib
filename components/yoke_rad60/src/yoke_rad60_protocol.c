@@ -95,7 +95,9 @@ esp_err_t yoke_rad60_protocol_init(uart_port_t uart_num, gpio_num_t tx_pin, gpio
         ret = ESP_ERR_NO_MEM;
     }
     if (ret != ESP_OK) {
-        yoke_rad60_protocol_deinit(protocol);
+        /* Give the owner a cleanup-only handle if UART removal fails. */
+        if (yoke_rad60_protocol_deinit(protocol) != ESP_OK)
+            *out = protocol;
         return ret;
     }
 

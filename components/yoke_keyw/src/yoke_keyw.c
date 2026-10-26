@@ -36,6 +36,9 @@ struct yoke_keyw {
     atomic_bool initialized;
 };
 
+/* Lifecycle calls are serialized by the application. */
+static yoke_keyw_handle_t s_failed_init;
+
 static void yoke_keyw_button_callback(void *button_handle, void *user_data) {
     (void)button_handle;
     yoke_keyw_handle_t keyw = user_data;
@@ -177,6 +180,14 @@ static esp_err_t keyw_create_button(yoke_keyw_handle_t keyw) {
 }
 
 yoke_keyw_handle_t yoke_keyw_init(rootmaker_port_t port) {
+    if (s_failed_init != NULL) {
+        esp_err_t ret = yoke_keyw_deinit(s_failed_init);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "previous initialization cleanup still failing: %s", esp_err_to_name(ret));
+            return NULL;
+        }
+        s_failed_init = NULL;
+    }
     gpio_num_t button_gpio_num;
     gpio_num_t led_gpio_num;
     esp_err_t ret = rootmaker_get_port_pins(&port, &button_gpio_num, &led_gpio_num);
@@ -230,7 +241,11 @@ yoke_keyw_handle_t yoke_keyw_init(rootmaker_port_t port) {
     ret = keyw_create_button(keyw);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "button init failed: %s", esp_err_to_name(ret));
-        (void)yoke_keyw_deinit(keyw);
+        ret = yoke_keyw_deinit(keyw);
+        if (ret != ESP_OK) {
+            s_failed_init = keyw;
+            ESP_LOGE(TAG, "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(ret));
+        }
         return NULL;
     }
     keyw->initialized = true;

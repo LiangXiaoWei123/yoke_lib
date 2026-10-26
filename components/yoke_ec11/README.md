@@ -98,6 +98,11 @@ invalidates the handle; set it to `NULL`. On error keep it for a cleanup retry
 and stop all business operations. Stop application access before cleanup and
 serialize lifecycle calls. Never reuse a successfully freed handle.
 
+If initialization fails and rollback also fails, the driver retains the
+unfinished instance internally. The next initialization call retries cleanup
+first and returns NULL while cleanup still fails. Serialize initialization
+and deinitialization with all other RootMaker lifecycle calls.
+
 ## Usage and API semantics
 
 The encoder, its button and its two RGB LEDs are accessed through I2C.

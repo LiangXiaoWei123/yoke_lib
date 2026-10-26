@@ -25,6 +25,9 @@ struct yoke_rgbw {
     gpio_num_t pins[1];
 };
 
+/* Lifecycle calls are serialized by the application. */
+static yoke_rgbw_handle_t s_failed_init;
+
 static const rmt_symbol_word_t s_zero = {
     .level0 = 1,
     .duration0 = 3,
@@ -72,6 +75,14 @@ static esp_err_t yoke_rgbw_transmit(yoke_rgbw_handle_t rgbw) {
 }
 
 yoke_rgbw_handle_t yoke_rgbw_init(rootmaker_port_t port, uint16_t led_num) {
+    if (s_failed_init != NULL) {
+        esp_err_t ret = yoke_rgbw_deinit(s_failed_init);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "previous initialization cleanup still failing: %s", esp_err_to_name(ret));
+            return NULL;
+        }
+        s_failed_init = NULL;
+    }
     gpio_num_t data_gpio;
     if (led_num == 0U || rootmaker_get_port_pin(&port, 0, &data_gpio) != ESP_OK) {
         ESP_LOGE(TAG, "invalid configuration");
@@ -125,7 +136,11 @@ yoke_rgbw_handle_t yoke_rgbw_init(rootmaker_port_t port, uint16_t led_num) {
 
 fail:
     ESP_LOGE(TAG, "initialization failed: %s", esp_err_to_name(ret));
-    (void)yoke_rgbw_deinit(rgbw);
+    ret = yoke_rgbw_deinit(rgbw);
+    if (ret != ESP_OK) {
+        s_failed_init = rgbw;
+        ESP_LOGE(TAG, "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(ret));
+    }
     return NULL;
 }
 
@@ -164,7 +179,9 @@ esp_err_t yoke_rgbw_deinit(yoke_rgbw_handle_t rgbw) {
 }
 
 esp_err_t yoke_rgbw_set_all(yoke_rgbw_handle_t rgbw, uint8_t red, uint8_t green, uint8_t blue, uint8_t white) {
-    if (rgbw == NULL || rgbw->stopping || !rgbw->channel_enabled || rgbw->encoder == NULL || rgbw->pixels == NULL) {
+    if (rgbw == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (rgbw->stopping || !rgbw->channel_enabled || rgbw->encoder == NULL || rgbw->pixels == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     for (size_t index = 0; index < rgbw->pixels_size; index += 4U) {
@@ -177,7 +194,9 @@ esp_err_t yoke_rgbw_set_all(yoke_rgbw_handle_t rgbw, uint8_t red, uint8_t green,
 }
 
 esp_err_t yoke_rgbw_set_pixel(yoke_rgbw_handle_t rgbw, uint16_t index, uint8_t red, uint8_t green, uint8_t blue, uint8_t white) {
-    if (rgbw == NULL || rgbw->stopping || !rgbw->channel_enabled || rgbw->encoder == NULL || rgbw->pixels == NULL) {
+    if (rgbw == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (rgbw->stopping || !rgbw->channel_enabled || rgbw->encoder == NULL || rgbw->pixels == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     if ((size_t)index >= rgbw->pixels_size / 4U) {

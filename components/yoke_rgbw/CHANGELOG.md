@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Return INVALID_ARG for NULL handles, retain failed initialization rollback, and keep RMT dependencies private.
+
 * Document the RootMaker development board scope without adding a targets list.
 
 * End every frame with a 300 us all-low reset interval, including consecutive writes.

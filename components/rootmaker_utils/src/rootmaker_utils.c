@@ -89,7 +89,7 @@ const rootmaker_port_t rootmaker_f_bus = {
 const rootmaker_port_t rootmaker_sys_i2c_port = {
     .type = ROOTMAKER_PORT_TYPE_RS_BUS,
     .pin_num = 2,
-    .pins = (gpio_num_t[]){ BOADR_SDA, BOADR_SCL },
+    .pins = (gpio_num_t[]){ BOARD_SDA, BOARD_SCL },
 };
 
 esp_err_t rootmaker_get_port_pins(const rootmaker_port_t *port, gpio_num_t *pin_a, gpio_num_t *pin_b) {

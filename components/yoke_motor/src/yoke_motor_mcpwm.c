@@ -103,9 +103,9 @@ static esp_err_t bdc_motor_mcpwm_del(bdc_motor_t *motor) {
         ESP_RETURN_ON_ERROR(mcpwm_del_comparator(mcpwm_motor->cmpb), TAG, "delete cmpb failed");
         mcpwm_motor->cmpb = NULL;
     }
-    if (mcpwm_motor->operator!= NULL) {
+    if (mcpwm_motor->operator != NULL) {
         ESP_RETURN_ON_ERROR(mcpwm_del_operator(mcpwm_motor->operator), TAG, "delete operator failed");
-        mcpwm_motor->operator= NULL;
+        mcpwm_motor->operator = NULL;
     }
     if (mcpwm_motor->timer != NULL) {
         ESP_RETURN_ON_ERROR(mcpwm_del_timer(mcpwm_motor->timer), TAG, "delete timer failed");
@@ -119,8 +119,11 @@ esp_err_t yoke_motor_new_mcpwm_device(const bdc_motor_config_t *motor_config, co
     bdc_motor_mcpwm_obj *mcpwm_motor = NULL;
     esp_err_t ret = ESP_OK;
     ESP_GOTO_ON_FALSE(motor_config && mcpwm_config && ret_motor, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
+    *ret_motor = NULL;
     mcpwm_motor = calloc(1, sizeof(bdc_motor_mcpwm_obj));
-    ESP_GOTO_ON_FALSE(mcpwm_motor, ESP_ERR_NO_MEM, err, TAG, "no mem for rmt motor");
+    ESP_GOTO_ON_FALSE(mcpwm_motor, ESP_ERR_NO_MEM, err, TAG, "no mem for mcpwm motor");
+    /* A partially constructed device may still need a deletion retry. */
+    mcpwm_motor->base.del = bdc_motor_mcpwm_del;
 
     // mcpwm timer
     mcpwm_timer_config_t timer_config = {
@@ -178,25 +181,8 @@ esp_err_t yoke_motor_new_mcpwm_device(const bdc_motor_config_t *motor_config, co
 
 err:
     if (mcpwm_motor) {
-        if (mcpwm_motor->gena) {
-            mcpwm_del_generator(mcpwm_motor->gena);
-        }
-        if (mcpwm_motor->genb) {
-            mcpwm_del_generator(mcpwm_motor->genb);
-        }
-        if (mcpwm_motor->cmpa) {
-            mcpwm_del_comparator(mcpwm_motor->cmpa);
-        }
-        if (mcpwm_motor->cmpb) {
-            mcpwm_del_comparator(mcpwm_motor->cmpb);
-        }
-        if (mcpwm_motor->operator) {
-            mcpwm_del_operator(mcpwm_motor->operator);
-        }
-        if (mcpwm_motor->timer) {
-            mcpwm_del_timer(mcpwm_motor->timer);
-        }
-        free(mcpwm_motor);
+        if (bdc_motor_mcpwm_del(&mcpwm_motor->base) != ESP_OK)
+            *ret_motor = &mcpwm_motor->base;
     }
     return ret;
 }

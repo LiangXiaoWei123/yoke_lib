@@ -13,3 +13,4 @@ dependencies:
     version: ">=5.3"
   ryzobeezero/rootmaker_utils:
     version: "^1.0.0"
+    require: public

@@ -28,6 +28,9 @@ struct yoke_rad60 {
     atomic_bool stopping;
 };
 
+/* Lifecycle calls are serialized by the application. */
+static yoke_rad60_handle_t s_failed_init;
+
 static void yoke_rad60_task(void *arg);
 
 static void yoke_rad60_process_multitarget_det_info(yoke_rad60_handle_t radar, uint8_t len, uint8_t *buffer) {
@@ -126,6 +129,14 @@ static void yoke_rad60_task(void *arg) {
 }
 
 yoke_rad60_handle_t yoke_rad60_init(rootmaker_port_t port, uart_port_t uart_num) {
+    if (s_failed_init != NULL) {
+        esp_err_t ret = yoke_rad60_deinit(s_failed_init);
+        if (ret != ESP_OK) {
+            ESP_LOGE("yoke_rad60", "previous initialization cleanup still failing: %s", esp_err_to_name(ret));
+            return NULL;
+        }
+        s_failed_init = NULL;
+    }
     gpio_num_t tx, rx;
     if (uart_num < UART_NUM_0 || uart_num >= UART_NUM_MAX || rootmaker_get_port_pins(&port, &tx, &rx) != ESP_OK || tx == rx ||
         uart_is_driver_installed(uart_num))
@@ -159,7 +170,11 @@ yoke_rad60_handle_t yoke_rad60_init(rootmaker_port_t port, uart_port_t uart_num)
     return radar;
 fail:
     ESP_LOGE("yoke_rad60", "initialization failed: %s", esp_err_to_name(ret));
-    (void)yoke_rad60_deinit(radar);
+    ret = yoke_rad60_deinit(radar);
+    if (ret != ESP_OK) {
+        s_failed_init = radar;
+        ESP_LOGE("yoke_rad60", "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(ret));
+    }
     return NULL;
 }
 

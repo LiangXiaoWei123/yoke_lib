@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Declare rootmaker_utils as a public managed dependency.
+
 * Drain queued SPI transfers under the LVGL lock before deleting the display.
 * Wait for the LVGL port worker to exit before releasing resources or allowing reinitialization; preserve cleanup retry after timeout.
 

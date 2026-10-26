@@ -60,6 +60,20 @@ power baseboard share `rootmaker_sys_i2c_port`.
 
 For API usage, see each component's README.
 
+## Component conventions and application responsibilities
+
+* NULL handles and invalid arguments return `ESP_ERR_INVALID_ARG`.
+  Unavailable instances return `ESP_ERR_INVALID_STATE`.
+* Applications serialize lifecycle calls, stop instance access before cleanup,
+  and decide whether to retry or abort after an error. See the official
+  [I2C thread-safety rules](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32s3/api-reference/peripherals/i2c.html#thread-safety).
+* Initialization returns NULL on failure. If rollback fails too, the next init
+  retries cleanup before creating an instance. For the singleton screen, call
+  `yoke_screen_deinit()` when its log requests a cleanup retry.
+* Public-header dependencies use `REQUIRES` and `require: public`;
+  implementation-only dependencies use `PRIV_REQUIRES`.
+* Each public definition has one name. Update callers when renaming it.
+
 ## Integration project pins
 
 | Function | Default configuration |

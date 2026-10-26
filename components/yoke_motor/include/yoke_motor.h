@@ -77,6 +77,7 @@ esp_err_t yoke_motor_set_speed_percent(yoke_motor_handle_t motor, uint8_t percen
  *
  * @return
  *     - ESP_OK: Operation completed successfully.
+ *     - ESP_ERR_INVALID_ARG: The handle is NULL.
  *     - ESP_ERR_INVALID_STATE: The instance is unavailable or cleanup has started.
  *     - Other errors: Returned by the underlying resource operation.
  */
@@ -89,6 +90,7 @@ esp_err_t yoke_motor_forward(yoke_motor_handle_t motor);
  *
  * @return
  *     - ESP_OK: Operation completed successfully.
+ *     - ESP_ERR_INVALID_ARG: The handle is NULL.
  *     - ESP_ERR_INVALID_STATE: The instance is unavailable or cleanup has started.
  *     - Other errors: Returned by the underlying resource operation.
  */
@@ -101,6 +103,7 @@ esp_err_t yoke_motor_reverse(yoke_motor_handle_t motor);
  *
  * @return
  *     - ESP_OK: Operation completed successfully.
+ *     - ESP_ERR_INVALID_ARG: The handle is NULL.
  *     - ESP_ERR_INVALID_STATE: The instance is unavailable or cleanup has started.
  *     - Other errors: Returned by the underlying resource operation.
  */
@@ -113,6 +116,7 @@ esp_err_t yoke_motor_coast(yoke_motor_handle_t motor);
  *
  * @return
  *     - ESP_OK: Operation completed successfully.
+ *     - ESP_ERR_INVALID_ARG: The handle is NULL.
  *     - ESP_ERR_INVALID_STATE: The instance is unavailable or cleanup has started.
  *     - Other errors: Returned by the underlying resource operation.
  */

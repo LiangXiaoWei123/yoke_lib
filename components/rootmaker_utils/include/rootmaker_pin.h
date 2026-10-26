@@ -8,26 +8,26 @@
  */
 
 // Expansion port identifiers shared by KEYW, MOTO, RGBW, and RAD60.
-enum Rootmaker_RsPort_t {
-    RS_PORT1 = 0x00,
-    RS_PORT2 = 0x01,
-    RS_PORT3 = 0x02,
-    RS_PORT4 = 0x03,
-};
+typedef enum {
+    RS_PORT1 = 0,
+    RS_PORT2,
+    RS_PORT3,
+    RS_PORT4,
+} rootmaker_rs_port_t;
 
 // Board peripherals
 
 // UART0
-#define TX 43
-#define RX 44
+#define UART0_TX 43
+#define UART0_RX 44
 
 // On-board LED and button
 #define PIN_RGB_LED 45
 #define BTN_PIN 0
 
 // System I2C, shared with the touch panel and power baseboard
-#define BOADR_SDA 41
-#define BOADR_SCL 40
+#define BOARD_SDA 41
+#define BOARD_SCL 40
 
 // Motion sensor interrupt
 #define SEN_INT 42
@@ -88,8 +88,8 @@ enum Rootmaker_RsPort_t {
 #define F_BUS20 3
 #define F_BUS21 2
 #define F_BUS22 1
-#define F_BUS23 BOADR_SDA
-#define F_BUS24 BOADR_SCL
+#define F_BUS23 BOARD_SDA
+#define F_BUS24 BOARD_SCL
 
 // S_BUS connector
 #define S_BUS1 48
@@ -99,8 +99,8 @@ enum Rootmaker_RsPort_t {
 #define S_BUS5 39
 #define S_BUS6 33
 #define S_BUS7 35
-#define S_BUS8 BOADR_SCL
-#define S_BUS9 BOADR_SDA
+#define S_BUS8 BOARD_SCL
+#define S_BUS9 BOARD_SDA
 #define S_BUS10 45
 #define S_BUS11 37
 #define S_BUS12 36

@@ -66,6 +66,10 @@ typedef struct yoke_ec11 *yoke_ec11_handle_t;
  *
  * @param[in] port Port descriptor (pins[0]=SDA, pins[1]=SCL).
  * @return Driver handle, or NULL on failure (the error is logged).
+ *
+ * @note If initialization rollback fails, the unfinished instance is retained
+ * internally. The next initialization retries cleanup first and returns
+ * NULL while cleanup still fails. Serialize all RootMaker lifecycle calls.
  */
 yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port);
 
@@ -77,6 +81,7 @@ yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port);
  * @param[in] port I2C port; pins[0]=SDA, pins[1]=SCL.
  * @param[in] config Initialization configuration. Its contents are copied.
  * @return Driver handle, or NULL if the configuration is invalid or initialization fails.
+ * @note Uses the same rollback retry and lifecycle rules as yoke_ec11_init().
  */
 yoke_ec11_handle_t yoke_ec11_init_with_config(rootmaker_port_t port, const yoke_ec11_config_t *config);
 

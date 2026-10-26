@@ -8,6 +8,7 @@
 #include "bdc_motor.h"
 #include "soc/soc_caps.h"
 
+/* With valid arguments, a non-NULL error output is owned only for deletion retry. */
 esp_err_t yoke_motor_new_mcpwm_device(const bdc_motor_config_t *, const bdc_motor_mcpwm_config_t *, bdc_motor_handle_t *);
 
 #define TAG "yoke_motor"
@@ -35,7 +36,9 @@ static bdc_motor_handle_t yoke_motor_handle(const yoke_motor_handle_t motor) {
 }
 
 static esp_err_t yoke_motor_check(const yoke_motor_handle_t motor) {
-    if (motor == NULL || !motor->initialized || motor->stopping || motor->handle == NULL) {
+    if (motor == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (!motor->initialized || motor->stopping || motor->handle == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
@@ -88,17 +91,15 @@ yoke_motor_handle_t yoke_motor_init(rootmaker_port_t port) {
     for (int group = 0; group < SOC_MCPWM_GROUPS; group++) {
         mcpwm_config.group_id = group;
         ret = yoke_motor_new_mcpwm_device(&motor_config, &mcpwm_config, &handle);
-        if (ret != ESP_ERR_NOT_FOUND)
+        if (ret != ESP_ERR_NOT_FOUND || handle != NULL)
             break;
     }
+    motor->handle = handle;
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "new mcpwm device failed: %s", esp_err_to_name(ret));
-        (void)rootmaker_release_port(&motor->port);
-        free(motor);
-        return NULL;
+        goto fail;
     }
 
-    motor->handle = handle;
     motor->period_ticks = YOKE_MOTOR_RESOLUTION_HZ / YOKE_MOTOR_PWM_FREQ_HZ;
     motor->initialized = true;
     ret = bdc_motor_enable(handle);
@@ -109,10 +110,11 @@ yoke_motor_handle_t yoke_motor_init(rootmaker_port_t port) {
     if (ret == ESP_OK)
         return motor;
 
-    esp_err_t cleanup_ret = yoke_motor_deinit(motor);
-    if (cleanup_ret != ESP_OK) {
+fail:
+    ret = yoke_motor_deinit(motor);
+    if (ret != ESP_OK) {
         s_failed_init_motor = motor;
-        ESP_LOGE(TAG, "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(cleanup_ret));
+        ESP_LOGE(TAG, "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(ret));
     }
     return NULL;
 }
@@ -124,13 +126,13 @@ esp_err_t yoke_motor_deinit(yoke_motor_handle_t motor) {
     esp_err_t ret;
     if (motor->handle != NULL) {
         bdc_motor_handle_t handle = yoke_motor_handle(motor);
-        if (!motor->coasted) {
+        if (motor->initialized && !motor->coasted) {
             ret = bdc_motor_coast(handle);
             if (ret != ESP_OK)
                 return ret;
             motor->coasted = true;
         }
-        if (!motor->disabled) {
+        if (motor->initialized && !motor->disabled) {
             ret = bdc_motor_disable(handle);
             if (ret != ESP_OK)
                 return ret;

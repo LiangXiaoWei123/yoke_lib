@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Return INVALID_ARG for NULL handles and retain failed initialization rollback for retry.
+
 * Document the RootMaker development board scope without adding a targets list.
 
 * Declare ESP-IDF >=5.5.3, matching the verified SDK and address-change API.

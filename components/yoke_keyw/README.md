@@ -65,6 +65,11 @@ and stop all business operations. Stop application access before cleanup and
 serialize lifecycle calls. Never reuse a successfully freed handle.
 KEYW cleanup and long-press reconfiguration must not run in button or ESP timer callbacks. Button deletion is dispatched between scans on the ESP timer task.
 
+If initialization fails and rollback also fails, the driver retains the
+unfinished instance internally. The next initialization call retries cleanup
+first and returns NULL while cleanup still fails. Serialize initialization
+and deinitialization with all other RootMaker lifecycle calls.
+
 ## Usage and API semantics
 
 `pins[0]` connects to the active-high button; `pins[1]` connects to the GPIO

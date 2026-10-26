@@ -32,6 +32,10 @@ typedef struct yoke_rgbw *yoke_rgbw_handle_t;
  * @param[in] led_num Number of LEDs; must be greater than zero.
  *
  * @return Instance handle on success; NULL if initialization fails.
+ *
+ * @note If initialization rollback fails, the unfinished instance is retained
+ * internally. The next initialization retries cleanup first and returns
+ * NULL while cleanup still fails. Serialize all RootMaker lifecycle calls.
  */
 yoke_rgbw_handle_t yoke_rgbw_init(rootmaker_port_t port, uint16_t led_num);
 
@@ -63,6 +67,7 @@ esp_err_t yoke_rgbw_deinit(yoke_rgbw_handle_t rgbw);
  *
  * @return
  *     - ESP_OK: Operation completed successfully.
+ *     - ESP_ERR_INVALID_ARG: The handle is NULL.
  *     - ESP_ERR_INVALID_STATE: The strip is unavailable or cleanup has started.
  *     - Other errors: Returned by the underlying resource operation.
  */

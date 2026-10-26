@@ -1099,7 +1099,7 @@ static void ui_refresh_radar(void) {
     uint8_t object_count = data.radar_info.obj_num > 2U ? 2U : data.radar_info.obj_num;
     for (int i = 0; i < 2; ++i) {
         if (i < object_count) {
-            const multitarget_obj_info_t *obj = &data.radar_info.obj[i];
+            const yoke_rad60_target_t *obj = &data.radar_info.obj[i];
             lv_label_set_text_fmt(s_radar_distance_labels[i], "%ucm", (unsigned)obj->range_val);
             lv_label_set_text_fmt(s_radar_angle_labels[i], "%ddeg", (int)obj->angle_val);
             lv_label_set_text_fmt(s_radar_velocity_labels[i], "%dcm/s", (int)obj->velo_val);

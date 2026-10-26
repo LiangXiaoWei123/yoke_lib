@@ -35,12 +35,17 @@ struct yoke_ec11 {
     bool address_held;
 };
 
+/* Lifecycle calls are serialized by the application. */
+static yoke_ec11_handle_t s_failed_init;
+
 static bool yoke_is_address_valid(uint8_t address) {
     return address >= 0x08U && address <= 0x77U;
 }
 
 static esp_err_t yoke_check(yoke_ec11_handle_t yoke) {
-    if (yoke == NULL || !yoke->initialized || yoke->stopping || yoke->dev_handle == NULL) {
+    if (yoke == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (!yoke->initialized || yoke->stopping || yoke->dev_handle == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
@@ -96,6 +101,14 @@ static bool yoke_config_is_valid(rootmaker_port_t port, const yoke_ec11_config_t
 }
 
 yoke_ec11_handle_t yoke_ec11_init_with_config(rootmaker_port_t port, const yoke_ec11_config_t *config) {
+    if (s_failed_init != NULL) {
+        esp_err_t ret = yoke_ec11_deinit(s_failed_init);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "previous initialization cleanup still failing: %s", esp_err_to_name(ret));
+            return NULL;
+        }
+        s_failed_init = NULL;
+    }
     if (!yoke_config_is_valid(port, config)) {
         ESP_LOGE(TAG, "invalid configuration");
         return NULL;
@@ -123,18 +136,13 @@ yoke_ec11_handle_t yoke_ec11_init_with_config(rootmaker_port_t port, const yoke_
     ret = rootmaker_claim_i2c_address(yoke->bus_handle, yoke->device_address);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2C address already bound or unavailable: %s", esp_err_to_name(ret));
-        (void)rootmaker_del_i2c_bus(&yoke->port);
-        free(yoke);
-        return NULL;
+        goto fail;
     }
     yoke->address_held = true;
     ret = yoke_add_device(yoke, config->device_address);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "add device failed: %s", esp_err_to_name(ret));
-        (void)rootmaker_release_i2c_address(yoke->bus_handle, yoke->device_address);
-        (void)rootmaker_del_i2c_bus(&yoke->port);
-        free(yoke);
-        return NULL;
+        goto fail;
     }
     yoke->initialized = true;
 
@@ -145,15 +153,21 @@ yoke_ec11_handle_t yoke_ec11_init_with_config(rootmaker_port_t port, const yoke_
                  "device ID read failed: address=0x%02X SDA=GPIO%d SCL=GPIO%d: %s (0x%x). "
                  "Check module power, common GND, SDA/SCL order and pull-ups",
                  yoke->device_address, yoke->port.pins[0], yoke->port.pins[1], esp_err_to_name(ret), ret);
-        (void)yoke_ec11_deinit(yoke);
-        return NULL;
+        goto fail;
     }
     if (device_id != YOKE_EC11_DEVICE_ID) {
         ESP_LOGE(TAG, "unexpected device ID at address 0x%02X: got 0x%04X, expected 0x%04X", yoke->device_address, device_id, YOKE_EC11_DEVICE_ID);
-        (void)yoke_ec11_deinit(yoke);
-        return NULL;
+        goto fail;
     }
     return yoke;
+
+fail:
+    ret = yoke_ec11_deinit(yoke);
+    if (ret != ESP_OK) {
+        s_failed_init = yoke;
+        ESP_LOGE(TAG, "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(ret));
+    }
+    return NULL;
 }
 
 yoke_ec11_handle_t yoke_ec11_init(rootmaker_port_t port) {

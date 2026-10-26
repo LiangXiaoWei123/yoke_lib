@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Return INVALID_ARG for NULL handles and retain partial MCPWM construction on cleanup failure.
+
 * Retain failed initialization rollback for cleanup retry on the next init call.
 
 * Document the RootMaker development board scope without adding a targets list.

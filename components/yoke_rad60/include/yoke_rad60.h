@@ -3,8 +3,7 @@
  * @brief Multi-instance RAD60 UART radar driver.
  */
 
-#ifndef __YOKE_RAD60_RADAR_H__
-#define __YOKE_RAD60_RADAR_H__
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -23,7 +22,7 @@ typedef struct {
     int16_t velo_val;   /**< Velocity in cm/s. */
     uint8_t objid;      /**< Target ID. */
     uint8_t reserved0;  /**< Reserved. */
-} multitarget_obj_info_t;
+} yoke_rad60_target_t;
 
 /**
  * @brief Latest target detection result, with up to two targets.
@@ -31,8 +30,8 @@ typedef struct {
 typedef struct {
     uint8_t obj_num;               /**< Number of detected targets. */
     uint8_t reserved[3];           /**< Reserved. */
-    multitarget_obj_info_t obj[2]; /**< Target data; up to two targets are supported. */
-} multitarget_det_info_t;
+    yoke_rad60_target_t obj[2];    /**< Target data; up to two targets are supported. */
+} yoke_rad60_detection_t;
 
 /**
  * @brief Cached detection data and communication status for one instance.
@@ -40,7 +39,7 @@ typedef struct {
 typedef struct {
     bool is_comm_ok;                   /**< True when radar communication is healthy. */
     bool is_detected;                  /**< True when at least one target is detected. */
-    multitarget_det_info_t radar_info; /**< Radar detection data. */
+    yoke_rad60_detection_t radar_info; /**< Radar detection data. */
 } yoke_rad60_radar_data_t;
 
 #ifdef __cplusplus
@@ -61,6 +60,10 @@ typedef struct yoke_rad60 *yoke_rad60_handle_t;
  * @param[in] uart_num UART controller; must be free and different for each radar instance.
  *
  * @return Instance handle on success; NULL if initialization fails.
+ *
+ * @note If initialization rollback fails, the unfinished instance is retained
+ * internally. The next initialization retries cleanup first and returns
+ * NULL while cleanup still fails. Serialize all RootMaker lifecycle calls.
  */
 yoke_rad60_handle_t yoke_rad60_init(rootmaker_port_t port, uart_port_t uart_num);
 
@@ -103,6 +106,4 @@ esp_err_t yoke_rad60_get_radar_data(yoke_rad60_handle_t radar, yoke_rad60_radar_
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

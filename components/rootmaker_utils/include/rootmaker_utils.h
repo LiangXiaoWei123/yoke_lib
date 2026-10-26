@@ -59,7 +59,7 @@ extern const rootmaker_port_t rootmaker_s_bus;
 extern const rootmaker_port_t rootmaker_f_bus;
 
 /**
- * @brief On-board system I2C (SDA=BOADR_SDA, SCL=BOADR_SCL), shared by the power baseboard and the touch panel.
+ * @brief On-board system I2C (GPIOs from rootmaker_pin.h), shared by the power baseboard and the touch panel.
  */
 extern const rootmaker_port_t rootmaker_sys_i2c_port;
 

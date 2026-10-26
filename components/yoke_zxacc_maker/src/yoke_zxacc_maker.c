@@ -30,6 +30,9 @@ struct yoke_zxacc_maker {
     bool address_held;
 };
 
+/* Lifecycle calls are serialized by the application. */
+static yoke_zxacc_maker_handle_t s_failed_init;
+
 static bool zxacc_is_ready(yoke_zxacc_maker_handle_t board) {
     return board != NULL && board->initialized && !board->stopping && board->i2c_device != NULL;
 }
@@ -69,6 +72,14 @@ static esp_err_t zxacc_write_u16(yoke_zxacc_maker_handle_t board, uint8_t reg, u
 }
 
 yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(rootmaker_port_t port) {
+    if (s_failed_init != NULL) {
+        esp_err_t ret = yoke_zxacc_maker_deinit(s_failed_init);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "previous initialization cleanup still failing: %s", esp_err_to_name(ret));
+            return NULL;
+        }
+        s_failed_init = NULL;
+    }
     gpio_num_t sda, scl;
     if (rootmaker_get_port_pins(&port, &sda, &scl) != ESP_OK || sda == scl)
         return NULL;
@@ -91,9 +102,7 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(rootmaker_port_t port) {
     ret = rootmaker_claim_i2c_address(board->i2c_bus, YOKE_ZXACC_MAKER_DEFAULT_I2C_ADDR);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2C address already bound or unavailable: %s", esp_err_to_name(ret));
-        (void)rootmaker_del_i2c_bus(&board->port);
-        free(board);
-        return NULL;
+        goto fail;
     }
 
     board->address_held = true;
@@ -105,13 +114,18 @@ yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(rootmaker_port_t port) {
     ret = i2c_master_bus_add_device(board->i2c_bus, &device_config, &board->i2c_device);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "add device failed: %s", esp_err_to_name(ret));
-        (void)rootmaker_release_i2c_address(board->i2c_bus, YOKE_ZXACC_MAKER_DEFAULT_I2C_ADDR);
-        (void)rootmaker_del_i2c_bus(&board->port);
-        free(board);
-        return NULL;
+        goto fail;
     }
     board->initialized = true;
     return board;
+
+fail:
+    ret = yoke_zxacc_maker_deinit(board);
+    if (ret != ESP_OK) {
+        s_failed_init = board;
+        ESP_LOGE(TAG, "initialization cleanup failed: %s; next init will retry cleanup", esp_err_to_name(ret));
+    }
+    return NULL;
 }
 
 esp_err_t yoke_zxacc_maker_deinit(yoke_zxacc_maker_handle_t board) {

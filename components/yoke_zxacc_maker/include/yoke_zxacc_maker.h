@@ -41,6 +41,10 @@ typedef struct yoke_zxacc_maker *yoke_zxacc_maker_handle_t;
  * @param[in] port RootMaker port descriptor.
  *
  * @return Instance handle on success; NULL if initialization fails.
+ *
+ * @note If initialization rollback fails, the unfinished instance is retained
+ * internally. The next initialization retries cleanup first and returns
+ * NULL while cleanup still fails. Serialize all RootMaker lifecycle calls.
  */
 yoke_zxacc_maker_handle_t yoke_zxacc_maker_init(rootmaker_port_t port);
 

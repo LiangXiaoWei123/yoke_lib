@@ -76,6 +76,11 @@ rejected once cleanup has started. Stop application reads before deinitializing.
 Initialization and deinitialization must be serialized with other RootMaker
 component lifecycle calls. Instance count is limited by available UARTs and memory.
 
+If initialization fails and rollback also fails, the driver retains the
+unfinished instance internally. The next initialization call retries cleanup
+first and returns NULL while cleanup still fails. Serialize initialization
+and deinitialization with all other RootMaker lifecycle calls.
+
 ## Usage and API semantics
 
 `pins[0]` is the ESP32 UART TX signal (connect to module RX); `pins[1]` is UART RX

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Use UART0_TX/RX, BOARD_SDA/SCL and rootmaker_rs_port_t; keep one name per definition.
+
 * Document the RootMaker development board scope without adding a targets list.
 
 * Reject partial/swapped I2C pin overlap while preserving exact-pair sharing.

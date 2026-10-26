@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Declare rootmaker_utils as public and retain failed initialization rollback for retry.
+
 * Document the RootMaker development board scope without adding a targets list.
 
 * Clarify device attachment versus probing, millisecond button timing and second-based wake-up.

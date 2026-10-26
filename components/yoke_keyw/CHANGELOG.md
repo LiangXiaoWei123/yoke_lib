@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Retain failed initialization rollback for retry without adding application-side synchronization.
+
 * Document the RootMaker development board scope without adding a targets list.
 
 * Serialize button creation, removal and subscription changes on the ESP timer task.
